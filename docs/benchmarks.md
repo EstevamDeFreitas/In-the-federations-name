@@ -1,5 +1,148 @@
 # Benchmarks — movimento e routing
 
+## Routed movement — Marco 003.5 (9 de outubro de 2026)
+
+Benchmark separado: `federation-routed-movement-bench`. Routing prepara 1.000 rotas
+com um único RoutingWorkspace reutilizado, antes de medir. A grid Road bidirecional
+128 × 128 tem 16.384 nós, 65.024 arestas, distância 1.024 por conexão e custo lógico
+10. São 100.000 veículos distribuídos ciclicamente entre os 1.000 planos imutáveis;
+comprimento médio de plano: 85,922 arestas. Speed = 4 unidades/ms, timestep = 20 ms,
+seed = 42. Nenhum Dijkstra, cache ou replanning ocorre durante ticks medidos.
+
+Cada contagem/rodada reconstrói o mesmo mundo e seu pool persistente. Construção,
+consulta, persistência, atribuição, tick inicial de aplicação e 20 ticks de warmup
+ficam fora da medição. Medem-se 200 ticks em cada uma das três rodadas; ordem das
+contagens embaralhada deterministicamente por rodada. O timer envolve `sim.tick()`
+com ApplyCommands, Movement e Finalize; leitura de métricas, checksum e JSON ficam
+fora. Percentis agregam 600 amostras por contagem, usando nearest rank (mediana média
+os centrais). Throughput usa o total realmente processado dividido pelo tempo somado.
+
+Chegadas estacionam; não há reciclagem de viagens. A carga ativa diminui durante a
+execução: 3.000 chegadas por rodada, 59.424.300 atualizações FollowingRoute e
+4.757.100 transições somadas nas três rodadas, iguais em todas as contagens. Arrived,
+NeedsRoute e movimento sintético não entram no numerador de routed updates.
+Estes números medem esta distribuição e duração, não throughput estacionário de
+100.000 veículos eternamente ativos. Nenhum safety guard foi acionado.
+
+Ambiente: Windows x86_64, Intel Core i5-10400 @ 2.90 GHz, 12 CPUs lógicas,
+rustc/Cargo 1.87.0, build release. Sem afinidade, isolamento térmico ou intervalo de
+confiança. 16 threads excedem as CPUs lógicas disponíveis.
+
+### Planos compartilhados
+
+| Threads | Tick médio ms | P50 ms | P95 ms | P99 ms | Veículos/s | Transições/s | Chegadas/s | Speedup |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 11.6155 | 11.3517 | 14.0584 | 14.8550 | 8526577 | 682579 | 1291 | 1.00× |
+| 2 | 5.8140 | 5.6343 | 7.1716 | 7.5042 | 17034916 | 1363698 | 2580 | 2.00× |
+| 4 | 3.0473 | 2.9421 | 3.7340 | 4.3016 | 32500825 | 2601792 | 4922 | 3.81× |
+| 8 | 1.9348 | 1.8800 | 2.2627 | 2.5179 | 51187998 | 4097758 | 7753 | 6.00× |
+| 12 | 1.6604 | 1.5835 | 2.0646 | 2.2923 | 59648603 | 4775056 | 9034 | 7.00× |
+| 16 | 1.7703 | 1.7307 | 2.1485 | 2.2888 | 55946703 | 4478708 | 8473 | 6.56× |
+
+Checksums v4 iguais entre threads e rodadas: `4d173e145444704e`. NeedsRoute = 0.
+12 threads tiveram o menor tick médio neste cenário: 1,6604 ms, speedup 7,00×.
+16 threads pioraram a média; não há justificativa para generalizar a contagem ideal.
+Dados completos: [routed-movement-results-0035.json](routed-movement-results-0035.json).
+
+### Um plano por veículo
+
+`--unique-plan-per-vehicle` persiste 100.000 planos, clonando as mesmas 1.000 rotas
+preparadas. Não calcula um caminho distinto por veículo. Geometria, distribuição,
+atualizações, transições e chegadas são iguais ao cenário compartilhado; IDs e
+quantidade de planos diferem, portanto o checksum entre cenários deve diferir.
+
+| Threads | Tick médio ms | P50 ms | P95 ms | P99 ms | Veículos/s | Transições/s | Chegadas/s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 19.2829 | 18.7558 | 22.0034 | 24.9657 | 5136181 | 411167 | 778 |
+| 2 | 9.9107 | 9.6271 | 11.5407 | 14.2522 | 9993309 | 799995 | 1514 |
+| 4 | 5.1223 | 5.0392 | 5.8794 | 6.1846 | 19335071 | 1547833 | 2928 |
+| 8 | 3.4189 | 3.3110 | 4.0369 | 5.8494 | 28968154 | 2318991 | 4387 |
+| 12 | 2.8024 | 2.6881 | 3.6892 | 4.0544 | 35341460 | 2829194 | 5353 |
+| 16 | 2.9167 | 2.8153 | 3.4557 | 4.7959 | 33955949 | 2718279 | 5143 |
+
+Checksums iguais dentro do cenário: `fe6ca06509a221a8`; NeedsRoute e guards = 0.
+Com 12 threads o tick médio foi 2,8024 ms, contra 1,6604 ms com compartilhamento.
+As execuções são separadas, não um experimento com isolamento completo; a diferença
+observada é compatível com maior memória/tráfego de planos, sem provar causalidade
+exclusiva. Dados: [routed-movement-unique-0035.json](routed-movement-unique-0035.json).
+
+### Estimativa de memória
+
+Capacidades reais de Vec × `size_of` no alvo Windows x86_64 compilado, em bytes.
+
+| Categoria | 1.000 planos compartilhados | 100.000 planos individuais |
+| --- | --- | --- |
+| Arrays base de veículos (ID/X/Y/VX/VY) | 4.000.000 | 4.000.000 |
+| Arrays de estado de movimento | 8.100.000 | 8.100.000 |
+| Buffers de eventos | 3.300.000 | 3.300.000 |
+| Registros opcionais de planos | 81.920 | 10.485.760 |
+| Sequências de arestas dos planos | 687.376 | 68.737.600 |
+| Total do subconjunto | 16.169.296 | 94.623.360 |
+
+Planos: 769.296 bytes compartilhados versus 79.223.360 individuais. Os registros
+incluem seus headers Vec embutidos e capacidade reservada. Estes valores não são
+RSS nem memória total: excluem terreno, rede/tombstones, fila de comandos, allocator
+overhead, headers dos arrays principais, stack, scratch de routing e benchmark.
+Não há cleanup de planos; reservas e planos retidos podem crescer no futuro.
+
+### Lazy invalidation
+
+Cenário secundário: grid 32 × 32, 10.000 veículos, 100 planos com média 22,05 arestas,
+100 ticks medidos, warmup 0, três rodadas, speed 30 unidades/ms. Antes do tick medido
+índice 5 (zero-based), enfileirar disable ou remove de oito arestas selecionadas de
+posições futuras nos planos. A submissão fica fora do timer; ApplyCommands dentro.
+Nenhuma rota é recalculada. JSON registra os parâmetros exatos.
+
+| Threads | Disable: tick médio ms | Remove: tick médio ms | NeedsRoute por rodada, cada cenário |
+| --- | --- | --- | --- |
+| 1 | 0.3760 | 0.3790 | 900 |
+| 2 | 0.2109 | 0.2097 | 900 |
+| 4 | 0.1435 | 0.1421 | 900 |
+| 8 | 0.1176 | 0.1178 | 900 |
+| 12 | 0.1269 | 0.1259 | 900 |
+| 16 | 0.1205 | 0.1230 | 900 |
+
+Em cada cenário/contagem: 900 NeedsRoute e 9.100 chegadas por rodada; total medido
+nas três rodadas: 1.053.300 atualizações e 626.700 transições. Guards = 0. Eventos
+não se repetem após estacionar. Os tempos refletem grande queda da carga ativa,
+portanto não são comparáveis diretamente ao cenário principal.
+
+Todos os checksums coincidiram dentro de cada ação: disable `9f48c764f61793a9`,
+remove `f4ee739bf071ae8d`. As ações alteram estados diferentes da rede. Tests cobrem
+que o veículo conclui uma aresta já iniciada, bloqueia antes da próxima inválida e
+que uma edição distante não invalida globalmente os planos.
+
+Dados: [disable](routed-invalidation-disable-0035.json) e
+[remove](routed-invalidation-remove-0035.json), incluindo percentis, throughput,
+memória, contadores e tempos por rodada.
+
+### Reproduzir Marco 003.5
+
+```sh
+cargo run -p federation-bench --bin federation-routed-movement-bench --release --locked -- --width 128 --height 128 --vehicles 100000 --plans 1000 --ticks 200 --warmup 20 --runs 3 --threads 1,2,4,8,12,16 --speed 4 --seed 42 --output-json target/routed-shared.json
+```
+
+Repetir com `--unique-plan-per-vehicle --output-json target/routed-unique.json` para
+comparar planos individuais. Cenário secundário:
+
+```sh
+cargo run -p federation-bench --bin federation-routed-movement-bench --release --locked -- --width 32 --height 32 --vehicles 10000 --plans 100 --ticks 100 --warmup 0 --runs 3 --threads 1,2,4,8,12,16 --speed 30 --seed 42 --invalidate-at 5 --invalidate-count 8 --invalidation-action disable --output-json target/routed-disable.json
+```
+
+Repetir com `--invalidation-action remove --output-json target/routed-remove.json`.
+As medições registradas chamaram os executáveis release diretamente com estes
+argumentos. Para smoke usar grid 8 × 8, 1.000 veículos, 10 planos e 20 ticks.
+
+### Relação com o Marco 003
+
+Os resultados históricos abaixo foram preservados. Dijkstra continua sendo o
+baseline correto: na grid maior, exploração e latência cresceram significativamente.
+Paralelismo aumentou throughput enquanto também aumentou latência individual.
+Isso fundamenta workspaces por worker e consultas por demanda, sem pathfinding
+contínuo por agente. Routed movement mede consumo, não consultas. Não se atribui
+uma melhoria de routing à fase 003.5; otimizações dependem de benchmarks próprios.
+Checksums históricos v2/v3 e atuais v4 usam contratos distintos.
+
 ## Routing baseline — Marco 003 (9 de outubro de 2026)
 
 Dijkstra é medido separadamente do movimento. O gerador cria uma grid determinística

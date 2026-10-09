@@ -1,3 +1,4 @@
+use crate::route_plans::RoutePlans;
 use crate::transport::network::TransportNetwork;
 use crate::{SimulationError, config::SimulationConfig, entities::Vehicles};
 use crate::{commands::CommandQueue, terrain::Terrain};
@@ -27,19 +28,30 @@ impl Scheduler {
     }
     pub fn tick(
         &self,
-        vehicles: &mut Vehicles,
-        terrain: &mut Terrain,
-        commands: &mut CommandQueue,
-        network: &mut TransportNetwork,
+        state: TickState<'_>,
         config: &SimulationConfig,
-        ticks: &mut u64,
     ) -> Result<(), SimulationError> {
+        let TickState {
+            vehicles,
+            terrain,
+            commands,
+            network,
+            plans,
+            ticks,
+        } = state;
         let next_tick = ticks.checked_add(1).ok_or(SimulationError::TickOverflow)?;
+        vehicles.begin_tick();
         for phase in TICK_PHASES {
             match phase {
-                Phase::ApplyCommands => commands.apply(terrain, vehicles, network),
+                Phase::ApplyCommands => commands.apply(terrain, vehicles, network, plans),
                 Phase::Movement => self.pool.install(|| {
-                    vehicles.move_parallel(config.width, config.height, config.tick_ms)
+                    vehicles.move_parallel(
+                        config.width,
+                        config.height,
+                        config.tick_ms,
+                        network,
+                        plans,
+                    )
                 }),
                 Phase::Finalize => *ticks = next_tick,
                 Phase::Diagnostics => unreachable!("diagnostics are requested separately"),
@@ -47,6 +59,15 @@ impl Scheduler {
         }
         Ok(())
     }
+}
+
+pub(crate) struct TickState<'a> {
+    pub vehicles: &'a mut Vehicles,
+    pub terrain: &'a mut Terrain,
+    pub commands: &'a mut CommandQueue,
+    pub network: &'a mut TransportNetwork,
+    pub plans: &'a mut RoutePlans,
+    pub ticks: &'a mut u64,
 }
 
 #[cfg(test)]
@@ -66,15 +87,19 @@ mod tests {
         let mut terrain = Terrain::new(config.width, config.height, config.chunk_size).unwrap();
         let mut commands = CommandQueue::default();
         let mut network = TransportNetwork::default();
+        let mut plans = RoutePlans::default();
         for _ in 0..4 {
             scheduler
                 .tick(
-                    &mut vehicles,
-                    &mut terrain,
-                    &mut commands,
-                    &mut network,
+                    TickState {
+                        vehicles: &mut vehicles,
+                        terrain: &mut terrain,
+                        commands: &mut commands,
+                        network: &mut network,
+                        plans: &mut plans,
+                        ticks: &mut ticks,
+                    },
                     &config,
-                    &mut ticks,
                 )
                 .unwrap();
         }

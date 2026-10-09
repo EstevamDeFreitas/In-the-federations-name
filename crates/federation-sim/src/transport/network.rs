@@ -43,6 +43,7 @@ pub(crate) struct EdgeData {
     pub to: TransportNodeId,
     pub mode: TransportMode,
     pub base_cost: u64,
+    pub physical_length: u64,
     pub enabled: bool,
 }
 
@@ -171,6 +172,10 @@ impl TransportNetwork {
                     to,
                     mode,
                     base_cost,
+                    physical_length: physical_length(
+                        self.nodes[source].position,
+                        self.nodes[target].position,
+                    )?,
                     enabled,
                 });
                 self.edges[slot].alive = true;
@@ -221,6 +226,14 @@ impl TransportNetwork {
         }
         Ok(())
     }
+    pub fn edge_data(&self, id: TransportEdgeId) -> Option<(bool, EdgeData)> {
+        let edge = &self.edges[self.edge_slot(id)?];
+        Some((edge.alive, edge.data?))
+    }
+    pub fn node_position(&self, id: TransportNodeId) -> Option<TransportPosition> {
+        let node = &self.nodes[self.node_slot(id)?];
+        node.used.then_some(node.position)
+    }
     pub fn checksum(&self, hash: &mut StableChecksum) {
         hash.u64(self.next_node);
         hash.u64(self.next_edge);
@@ -242,10 +255,19 @@ impl TransportNetwork {
                 hash.u64(data.to.0);
                 hash.bytes(&[data.mode.tag()]);
                 hash.u64(data.base_cost);
+                hash.u64(data.physical_length);
                 hash.bytes(&[u8::from(data.enabled)]);
             }
         }
     }
+}
+
+/// Manhattan length in X/Y/Z, minimum one for distinct colocated nodes.
+fn physical_length(a: TransportPosition, b: TransportPosition) -> Result<u64, CommandError> {
+    let length = (i128::from(a.x) - i128::from(b.x)).unsigned_abs()
+        + (i128::from(a.y) - i128::from(b.y)).unsigned_abs()
+        + (i128::from(a.z) - i128::from(b.z)).unsigned_abs();
+    u64::try_from(length.max(1)).map_err(|_| CommandError::InvalidTransportLength)
 }
 
 #[cfg(test)]

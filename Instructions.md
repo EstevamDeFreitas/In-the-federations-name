@@ -1,1137 +1,1322 @@
-# CODEX TASK 003 — Transport Network & Routing Foundation
+# CODEX TASK 003.5 — Vehicle Route Execution & Network Movement
 
 ## 1. Contexto
 
-O projeto **In The Federation's Name** possui os Marcos 001 e 002 concluídos.
+O projeto **In The Federation's Name** possui os Marcos 001, 002 e 003 concluídos.
 
 A arquitetura atual inclui:
 
-- núcleo Rust completamente headless;
+- núcleo Rust headless;
+- simulação determinística;
 - scheduler multithread baseado em Rayon;
 - timestep fixo;
-- terreno em heightmap com chunks;
-- veículos armazenados em SoA;
-- IDs públicos tipados;
 - comandos determinísticos;
-- snapshots owned e seletivos;
-- revisões de chunks;
-- checksum determinístico;
-- benchmarks reproduzíveis;
-- CI.
+- snapshots owned;
+- terreno em chunks;
+- veículos em SoA;
+- IDs estáveis;
+- multigrafo direcionado de transporte;
+- modos `Road` e `Rail`;
+- edição de rede por comandos;
+- revisão global da rede;
+- Dijkstra determinístico;
+- `RoutingWorkspace` reutilizável;
+- benchmark serial e paralelo de routing;
+- checksum v3;
+- CI e documentação técnica.
 
-O Marco 003 introduzirá a primeira infraestrutura lógica do mundo:
+O Marco 003 provou que a rede lógica e o pathfinding funcionam.
 
-> **uma rede de transporte direcionada, dinâmica e roteável.**
-
-Este marco não deve tentar implementar trânsito completo.
-
-Seu objetivo é construir a estrutura sobre a qual futuramente existirão:
-
-- estradas;
-- ferrovias;
-- ônibus;
-- caminhões;
-- transporte de trabalhadores;
-- logística industrial;
-- pathfinding hierárquico;
-- congestionamento;
-- linhas de transporte público.
-
----
-
-# 2. Objetivos principais
-
-Implementar:
-
-1. grafo lógico de transporte;
-2. IDs estáveis para nós e arestas;
-3. edição da rede via Commands;
-4. revisão global da rede;
-5. pathfinding determinístico;
-6. workspace de routing reutilizável;
-7. snapshots de diagnóstico da rede;
-8. benchmark específico de routing;
-9. testes de determinismo e correção;
-10. correções arquiteturais restantes do Marco 002.
-
----
-
-# 3. Correções obrigatórias do Marco 002
-
-Antes da implementação da rede, aplicar três ajustes.
-
-## 3.1 Remover `dirty` do checksum
-
-O checksum atual inclui:
-
-```text
-chunk.revision
-chunk.dirty
-```
-
-`dirty` é estado operacional interno e não estado autoritativo do mundo.
-
-Remover `dirty` do checksum.
-
-O checksum deve continuar incluindo:
-
-```text
-chunk.revision
-terrain height data
-```
-
-Adicionar teste provando que:
-
-```text
-clear_dirty()
-```
-
-não altera o checksum.
-
----
-
-## 3.2 Restringir exposição do storage interno
-
-As APIs públicas semelhantes a:
-
-```rust
-Simulation::terrain()
-Simulation::vehicles()
-```
-
-não devem funcionar como contrato normal para consumidores externos.
-
-Migrar a API pública para:
-
-```text
-Commands
-Snapshots
-Diagnostics
-Routing
-```
-
-Quando possível:
-
-- tornar getters de storage `pub(crate)`;
-- migrar testes de integração para snapshots;
-- manter testes unitários internos diretamente sobre `Terrain` e `Vehicles`.
-
-Não crie uma abstração artificial apenas para esconder código.
-
-O objetivo é impedir dependência externa no layout SoA.
-
----
-
-## 3.3 Metadata de snapshot
-
-Adicionar ao snapshot metadata equivalente a:
-
-```rust
-RegionSnapshotMetadata {
-    width: u32,
-    height: u32,
-    chunk_size: u32,
-}
-```
-
-O consumidor deve conseguir interpretar terreno e coordenadas sem acessar `SimulationConfig`.
-
----
-
-# 4. Modelo conceitual da rede
-
-Criar um novo módulo aproximadamente:
-
-```text
-transport/
-├── mod.rs
-├── network.rs
-├── ids.rs
-├── routing.rs
-└── snapshot.rs
-```
-
-Pequenos ajustes são aceitáveis.
-
-A estrutura principal será:
+O Marco 003.5 deve provar a próxima cadeia:
 
 ```text
 TransportNetwork
-    │
-    ├── Nodes
-    │
-    └── Directed Edges
+       ↓
+     Route
+       ↓
+RoutePlan
+       ↓
+    Vehicle
+       ↓
+edge progress
+       ↓
+next edge
+       ↓
+ destination
 ```
+
+Ainda não implementar:
+
+- congestionamento;
+- lanes;
+- cruzamentos físicos;
+- semáforos;
+- transporte público;
+- cidadãos;
+- empregos;
+- logística econômica;
+- renderer.
 
 ---
 
-# 5. Grafo direcionado e multigrafo
+# 2. Objetivo principal
 
-A rede deve ser um **grafo direcionado**.
+Fazer veículos existentes seguirem rotas reais sobre a rede de transporte.
 
-Uma estrada de mão dupla será representada conceitualmente como:
+Ao final deste marco, um veículo deverá ser capaz de:
 
-```text
-A → B
-A ← B
-```
-
-ou seja:
-
-```text
-duas arestas direcionadas
-```
-
-A rede deve permitir múltiplas arestas entre os mesmos nós.
-
-Exemplo:
-
-```text
-A ─road lane────→ B
-A ─expressway────→ B
-A ─rail──────────→ B
-```
-
-Não assuma que:
-
-```text
-(from, to)
-```
-
-identifica uma aresta de forma única.
-
-Isso é importante para:
-
-- vias paralelas;
-- sentidos diferentes;
-- futuras lanes;
-- modos diferentes;
-- pontes e túneis.
+1. receber uma rota válida;
+2. entrar na primeira edge;
+3. percorrer sua geometria;
+4. avançar por múltiplas edges;
+5. chegar ao destino;
+6. reagir deterministicamente a alterações da rede;
+7. expor seu estado por snapshots;
+8. executar em larga escala sem pathfinding por veículo a cada tick.
 
 ---
 
-# 6. IDs
+# 3. Regra arquitetural fundamental
 
-Adicionar:
+Routing e movement são sistemas diferentes.
 
-```rust
-TransportNodeId
-TransportEdgeId
+```text
+Routing
+    ↓
+produces route
+
+Movement
+    ↓
+consumes route
 ```
 
-Requisitos:
+Não executar Dijkstra durante o hot path normal de movimento.
 
-- tipos públicos distintos;
-- internamente podem usar `u64`;
-- não devem expor slots internos;
-- IDs não devem ser reutilizados neste marco;
-- remoção pode deixar tombstones;
-- IDs devem permanecer estáveis.
-
-Não criar ainda sistema genérico universal de entidade.
+O `Movement` deve apenas consumir planos já calculados.
 
 ---
 
-# 7. Alocação de IDs
+# 4. Registrar decisões arquiteturais obrigatórias
 
-A própria `Simulation` deve controlar a geração dos IDs.
+Antes ou durante a implementação, atualizar documentação para registrar formalmente estas decisões.
 
-Adicionar contadores monotônicos equivalentes a:
+## 4.1 RoutingWorkspace é por worker, nunca por agente
 
-```text
-next_transport_node_id
-next_transport_edge_id
-```
-
-Esses contadores fazem parte do estado determinístico e devem entrar no checksum.
-
-Para permitir criar nós e arestas no mesmo tick, disponibilizar APIs equivalentes a:
-
-```rust
-reserve_transport_node_id()
-reserve_transport_edge_id()
-```
-
-ou métodos de submissão especializados:
-
-```rust
-submit_create_transport_node(...)
-submit_create_transport_edge(...)
-```
-
-A escolha pode variar.
-
-Requisito fundamental:
-
-```text
-ID allocation order
-=
-command submission order
-```
-
-e deve ser determinística.
-
-IDs reservados e nunca utilizados não devem ser reutilizados.
-
----
-
-# 8. Coordenadas dos nós
-
-Cada nó deve possuir posição inteira.
-
-Usar algo equivalente a:
-
-```rust
-TransportPosition {
-    x: i64,
-    y: i64,
-    z: i64,
-}
-```
-
-Não usar floats.
-
-`x` e `y` devem ser compatíveis conceitualmente com:
-
-```text
-POSITION_UNITS_PER_TILE
-```
-
-já utilizado pelos veículos.
-
-`z` deve existir desde agora para permitir futuramente distinguir:
-
-```text
-estrada
-ponte
-túnel
-viaduto
-```
-
-Dois nós podem possuir o mesmo:
-
-```text
-x
-y
-```
-
-e ainda serem entidades diferentes.
+O benchmark do Marco 003 mostrou que `RoutingWorkspace` mantém arrays proporcionais ao tamanho da rede.
 
 Portanto:
 
-> posição espacial não determina conectividade.
+> Nunca criar um `RoutingWorkspace` por veículo, cidadão, viagem ou entidade simulada.
+
+Workspaces devem ser reutilizados por workers/sistemas de routing.
+
+Registrar isso em:
+
+```text
+AGENTS.md
+docs/architecture.md
+docs/transport-network.md
+```
 
 ---
 
-# 9. Modos de transporte
+## 4.2 Pathfinding não roda continuamente
 
-Adicionar enum inicial:
+O benchmark mostrou que Dijkstra pode visitar dezenas de milhares de nodes por consulta em redes sintéticas maiores.
+
+Registrar a regra:
+
+> Agentes não recalculam caminhos a cada tick.
+
+Routing deve ocorrer apenas quando necessário, por exemplo:
+
+```text
+new destination
+route invalidated
+trip created
+network event affecting route
+explicit replanning
+```
+
+---
+
+## 4.3 `base_cost` não representa distância física
+
+`TransportEdge.base_cost` representa custo lógico de routing.
+
+Não utilizar:
+
+```text
+base_cost
+```
+
+para determinar deslocamento físico.
+
+Uma edge deve possuir separadamente:
+
+```text
+routing cost
+physical length
+```
+
+---
+
+## 4.4 Network revision global é provisória
+
+A revisão global existente é adequada como baseline.
+
+Porém deve ser documentado:
+
+> Qualquer edição altera a revisão global, portanto ela não deve ser usada para obrigar todos os agentes a recalcular rotas.
+
+Futuramente poderão existir revisões por:
+
+```text
+sector
+component
+edge
+region
+```
+
+caso benchmarks justifiquem.
+
+---
+
+## 4.5 Invalidação de rota deve ser preguiçosa
+
+Uma alteração qualquer na rede não deve invalidar automaticamente todas as rotas.
+
+Regra:
+
+> Um veículo valida as edges que realmente pretende consumir.
+
+A mudança de uma edge distante não deve afetar um veículo cuja rota continua válida.
+
+---
+
+## 4.6 Rotas devem ser compartilháveis no futuro
+
+Não criar uma arquitetura onde:
+
+```text
+Vehicle
+owns Vec<TransportEdgeId>
+```
+
+seja um contrato obrigatório permanente.
+
+Neste marco a implementação pode ser simples, mas deve existir uma abstração:
+
+```text
+RoutePlan
+```
+
+que permita futuramente compartilhamento ou deduplicação.
+
+---
+
+# 5. Physical edge length
+
+Adicionar comprimento físico às edges.
+
+Conceitualmente:
 
 ```rust
-TransportMode {
-    Road,
-    Rail,
+physical_length: u64
+```
+
+ou um tipo novo.
+
+Não reutilizar `base_cost`.
+
+---
+
+# 6. Como calcular comprimento inicialmente
+
+Neste marco utilizar a posição dos nodes.
+
+Dados:
+
+```rust
+TransportPosition {
+    x,
+    y,
+    z,
 }
 ```
 
-Não implementar diferenças físicas complexas entre eles ainda.
+Calcular comprimento determinístico usando inteiros.
 
-Apenas permitir:
+Evitar float no estado autoritativo.
 
-- edges com modo;
-- routing filtrado por modo.
+É aceitável utilizar uma distância inteira aproximada baseada em:
 
-Não adicionar ainda:
+```text
+dx
+dy
+dz
+```
 
-- pedestrian;
-- tram;
-- subway;
-- air;
-- ship.
+desde que:
 
-Podem ser adicionados posteriormente.
+- seja determinística;
+- nunca produza zero para nodes distintos;
+- seja documentada;
+- suporte verticalidade futura.
+
+Pode ser usada raiz inteira de:
+
+```text
+dx² + dy² + dz²
+```
+
+se implementada de forma segura.
+
+Também é aceitável começar com outra métrica inteira justificada.
+
+Não introduzir floating point autoritativo.
 
 ---
 
-# 10. Arestas
+# 7. Overflow
 
-Cada aresta deve conter no mínimo:
+O cálculo deve proteger contra overflow.
 
-```text
-TransportEdgeId
-from
-to
-mode
-base_cost
-enabled
-```
-
-Usar custo inteiro.
-
-Sugestão:
+Como posições podem ser grandes, não fazer diretamente:
 
 ```rust
-base_cost: u64
+dx * dx
 ```
 
-ou outro inteiro adequado.
+em `i64`.
 
-Requisitos:
+Utilizar largura adequada como:
 
 ```text
-base_cost > 0
+i128 / u128
 ```
 
-Não permitir custo negativo.
-
-`enabled = false` representa algo como:
-
-```text
-estrada bloqueada
-obra
-acidente
-interdição
-```
-
-sem necessidade de remover a aresta.
+ou algoritmo equivalente.
 
 ---
 
-# 11. Não modelar congestionamento ainda
+# 8. Edge physical length é derivado ou armazenado?
 
-O custo deste marco é:
+Decidir entre:
 
-```text
-base_cost
-```
+### Opção A
 
-Não adicionar:
+Calcular na criação e armazenar.
 
-```text
-traffic density
-queue length
-congestion
-vehicle count
-weather
-fuel
-intersection delay
-```
+### Opção B
 
-Isso será responsabilidade de marcos futuros.
+Calcular quando necessário.
 
-O pathfinding atual fornecerá o **routing baseline**.
+Preferência atual:
 
----
-
-# 12. Armazenamento
-
-Escolha uma implementação simples e mensurável.
-
-Uma implementação aceitável é:
-
-```text
-Vec<NodeRecord>
-Vec<EdgeRecord>
-adjacency per node
-```
-
-com tombstones para remoções.
-
-Não implemente CSR ou estrutura altamente especializada sem evidência de necessidade.
-
-Porém:
-
-- evitar hash maps no hot path quando não necessários;
-- IDs devem resolver para slots de forma controlada;
-- adjacency deve preservar comportamento determinístico.
-
-Documente o layout escolhido.
-
----
-
-# 13. Remoção
-
-Implementar:
-
-```text
-RemoveTransportEdge
-RemoveTransportNode
-```
-
-Regras:
-
-### Edge
-
-Uma edge removida:
-
-```text
-alive = false
-```
-
-ou equivalente.
-
-Não reutilizar ID.
-
-### Node
-
-Um node só pode ser removido se não possuir edges vivas incidentes.
-
-Caso contrário:
-
-```text
-CommandError::TransportNodeInUse
-```
-
-ou equivalente.
-
-Não fazer remoção automática em cascata.
-
----
-
-# 14. Commands
-
-Adicionar Commands equivalentes a:
-
-```text
-CreateTransportNode
-CreateTransportEdge
-RemoveTransportNode
-RemoveTransportEdge
-SetTransportEdgeEnabled
-SetTransportEdgeCost
-```
-
-Todos devem passar pela fase:
-
-```text
-ApplyCommands
-```
-
-Nunca modificar rede diretamente através de API pública.
-
----
-
-# 15. Validação
-
-Validar:
-
-### Node
-
-- ID reservado válido;
-- ID ainda não utilizado;
-- posição dentro de limites de segurança.
-
-Não necessariamente dentro do mapa físico em todos os eixos, pois conexões externas poderão existir futuramente.
-
-### Edge
-
-Validar:
-
-```text
-from exists
-to exists
-from != to
-cost > 0
-mode valid
-edge id unused
-```
-
-Self-loops podem ser rejeitados neste marco.
-
-Documentar essa decisão.
-
----
-
-# 16. Dependências entre comandos do mesmo tick
-
-Deve ser possível:
-
-```text
-seq 1 → CreateNode A
-seq 2 → CreateNode B
-seq 3 → CreateEdge A→B
-```
-
-no mesmo tick.
-
-Como `ApplyCommands` é serial e ordenado:
-
-```text
-node A exists
-↓
-node B exists
-↓
-edge can be created
-```
-
-Adicionar teste explícito.
-
----
-
-# 17. Revisão da rede
-
-`TransportNetwork` deve possuir:
-
-```rust
-revision: u64
-```
-
-A revisão aumenta quando uma alteração efetiva muda routing ou topologia.
-
-Incrementar em:
-
-```text
-create node
-remove node
-create edge
-remove edge
-change edge cost
-enable edge
-disable edge
-```
-
-Não incrementar se:
-
-```text
-SetEdgeCost(existing_value)
-```
-
-ou:
-
-```text
-SetEnabled(existing_value)
-```
-
-não altera nada.
-
----
-
-# 18. Revisão global inicialmente
-
-Neste marco, uma única:
-
-```text
-network_revision
-```
-
-é suficiente.
-
-Isso significa que qualquer alteração invalida potencialmente qualquer cache futuro.
-
-Essa estratégia é deliberadamente conservadora.
-
-Documentar:
-
-> global revision é baseline, não compromisso arquitetural permanente.
-
-Futuramente poderemos usar:
-
-```text
-component revisions
-sector revisions
-edge revisions
-```
-
-se benchmarks justificarem.
-
----
-
-# 19. Overflow de revisão
-
-Usar comportamento explícito.
-
-Pode continuar seguindo a política atual de revisão saturante:
-
-```text
-u64::MAX
-```
-
-ou retornar erro.
-
-Escolher uma estratégia consistente e documentar.
-
-Não implementar epochs.
-
----
-
-# 20. Pathfinding inicial
-
-Implementar **Dijkstra determinístico**.
-
-Não implementar A* ainda como requisito.
+> calcular na criação da edge e armazenar.
 
 Motivo:
 
-- custo da edge é abstrato;
-- ainda não existe uma relação garantida entre distância geométrica e custo;
-- queremos um baseline correto antes de introduzir heurísticas.
+- endpoints não podem ser movidos atualmente;
+- movement consultará comprimento repetidamente;
+- evita recálculo no hot path.
 
-O algoritmo deve encontrar:
+Documentar a escolha.
+
+---
+
+# 9. Edge snapshot
+
+Adicionar:
 
 ```text
-menor custo total
+physical_length
 ```
 
-entre:
+a:
+
+```text
+TransportEdgeSnapshot
+```
+
+para debugging e futuros renderers.
+
+---
+
+# 10. RoutePlan
+
+Criar uma abstração equivalente a:
+
+```rust
+RoutePlanId
+RoutePlan
+```
+
+`RoutePlanId` deve ser identidade estável e opaca.
+
+Uma rota armazenada deve incluir no mínimo:
 
 ```text
 origin
 destination
-```
-
-para um único:
-
-```text
-TransportMode
+mode
+network_revision_when_created
+edge sequence
 ```
 
 ---
 
-# 21. RouteRequest
+# 11. Não usar network revision como validade absoluta
 
-Criar estrutura equivalente a:
+Embora um `RoutePlan` grave:
+
+```text
+network_revision_when_created
+```
+
+a mudança desse valor não torna a rota automaticamente inválida.
+
+Ele serve apenas para:
+
+- diagnóstico;
+- cache futuro;
+- debugging;
+- análise de idade da rota.
+
+---
+
+# 12. RoutePlan ownership
+
+Neste marco pode existir um armazenamento central:
+
+```text
+RoutePlans
+```
+
+dentro da Simulation.
+
+Algo equivalente:
+
+```text
+Vec<RoutePlanRecord>
+```
+
+é aceitável.
+
+Não implementar ainda:
+
+- deduplicação;
+- reference counting sofisticado;
+- garbage collector de rotas;
+- cache OD global.
+
+---
+
+# 13. IDs dos RoutePlans
+
+Adicionar:
 
 ```rust
-RouteRequest {
-    origin: TransportNodeId,
-    destination: TransportNodeId,
-    mode: TransportMode,
-}
+RoutePlanId
 ```
 
-Validar:
+Requisitos:
 
-```text
-origin exists
-destination exists
-```
+- opaco;
+- monotônico;
+- não reutilizado;
+- checksum determinístico;
+- não assumir índice como contrato externo.
 
 ---
 
-# 22. RouteResult
+# 14. Criação de RoutePlan
 
-Resultado mínimo:
+Adicionar API controlada equivalente a:
 
 ```rust
-Route {
-    network_revision,
-    origin,
-    destination,
-    mode,
-    total_cost,
-    edges,
-}
+Simulation::create_route_plan(...)
 ```
 
-`edges` deve estar na ordem de percurso.
+ou command equivalente.
 
-Pode incluir nodes se isso facilitar.
+Preferência:
 
-Não retornar apenas custo.
+Routing é uma consulta determinística e não altera mundo.
 
-O jogo precisará futuramente seguir a rota.
+Criar um `RoutePlan` persistente, porém, altera estado autoritativo.
+
+Portanto a persistência da rota deve ocorrer por command ou outra fronteira determinística claramente documentada.
+
+Uma possibilidade:
+
+```text
+find_route()
+    ↓
+Route
+
+submit StoreRoutePlan(Route)
+    ↓
+ApplyCommands
+```
+
+Outra solução equivalente é aceitável.
 
 ---
 
-# 23. Casos especiais
+# 15. Não guardar RoutingWorkspace
 
-### origin == destination
+`RoutePlan` guarda apenas saída útil.
 
-Retornar:
-
-```text
-cost = 0
-edges = []
-```
-
-### destino inalcançável
-
-Retornar erro ou enum explícito:
+Nunca armazenar:
 
 ```text
-NoRoute
+distance arrays
+heap
+seen
+settled
+RoutingWorkspace
 ```
-
-Não retornar `None` sem contexto.
 
 ---
 
-# 24. Determinismo do pathfinding
+# 16. Estado de movement dos veículos
 
-Quando duas rotas possuem exatamente o mesmo custo, o resultado deve continuar determinístico.
+Expandir armazenamento dos veículos.
 
-Definir tie-breaking estável.
-
-Sugestão:
+Adicionar campos conceituais equivalentes a:
 
 ```text
-cost
-↓
-node id
-↓
-edge id
+route_plan_id
+route_edge_index
+edge_progress
+movement_state
 ```
 
-ou regra equivalente.
+Manter layout data-oriented.
 
-O resultado não pode depender:
-
-- de endereço de memória;
-- de `HashMap` randomizado;
-- da ordem escolhida pelo Rayon;
-- de quantidade de threads.
-
-Adicionar testes com duas rotas de mesmo custo.
+Não transformar veículo em struct pesada com múltiplos `Option<Vec<...>>`.
 
 ---
 
-# 25. RoutingWorkspace
-
-Evitar alocar estruturas grandes para cada rota.
+# 17. VehicleMovementState
 
 Criar algo equivalente a:
 
 ```rust
-RoutingWorkspace
+enum VehicleMovementState {
+    Idle,
+    FollowingRoute,
+    Arrived,
+    NeedsRoute,
+}
 ```
 
-para armazenar scratch data reutilizável:
+Podem existir nomes diferentes.
 
-```text
-distance
-previous edge
-visited
-heap
-generation markers
-```
-
-A implementação exata é livre.
-
-Objetivo:
-
-```text
-route 1
-route 2
-route 3
-```
-
-não deve precisar recriar buffers do tamanho da rede em toda consulta.
+Sem estados excessivos nesta etapa.
 
 ---
 
-# 26. RoutingWorkspace não é estado autoritativo
+# 18. Route assignment
 
-O workspace:
+Adicionar comando:
 
-- não entra no checksum;
-- não entra em savegame;
-- não faz parte do snapshot;
-- pode ser descartado;
-- pode ser recriado.
+```text
+AssignVehicleRoute
+```
 
-Duas chamadas com workspaces diferentes devem produzir resultado idêntico.
+contendo:
+
+```text
+vehicle_id
+route_plan_id
+```
+
+Aplicação deve ocorrer em `ApplyCommands`.
 
 ---
 
-# 27. Routing paralelo futuro
+# 19. Validação da atribuição
 
-O design deve permitir:
+Ao atribuir uma rota:
 
-```text
-1 network
-+
-N RoutingWorkspace
-```
+- veículo deve existir;
+- route plan deve existir;
+- modo deve ser compatível futuramente, mas veículos ainda não possuem tipo de transporte obrigatório;
+- rota deve possuir origem coerente com a posição lógica esperada, quando aplicável.
 
-usados em paralelo.
-
-Não colocar:
-
-```text
-Mutex<RoutingWorkspace>
-```
-
-dentro da rede.
-
-A rede deve ser consultável imutavelmente.
+Não inventar ainda sistemas complexos de classe de veículo.
 
 ---
 
-# 28. API de routing
+# 20. Posição lógica de rede
 
-Criar API aproximadamente equivalente a:
+Introduzir para veículos em rota:
 
-```rust
-simulation.find_route(
-    request,
-    &mut workspace
-)
+```text
+current_transport_node
+```
+
+ou estado equivalente.
+
+É necessário saber em qual node o veículo se encontra quando está parado ou recalculando.
+
+---
+
+# 21. Movimento ao longo de edge
+
+Um veículo seguindo rota terá:
+
+```text
+current edge
+edge progress
+```
+
+onde:
+
+```text
+0 <= progress <= physical_length
+```
+
+---
+
+# 22. Speed
+
+Separar velocidade física das antigas velocidades sintéticas X/Y.
+
+Os campos:
+
+```text
+vx
+vy
+```
+
+do benchmark original não devem ser usados como modelo final do movimento em rede.
+
+Adicionar um conceito:
+
+```text
+network_speed
 ```
 
 ou:
 
-```rust
-TransportNetwork::find_route(...)
+```text
+speed_units_per_ms
 ```
 
-desde que o storage interno continue encapsulado.
-
-Preferir que sistemas externos não recebam acesso direto a arrays internos.
+inteiro.
 
 ---
 
-# 29. Métricas de routing
+# 23. Migração do movimento sintético
 
-Adicionar métricas opcionais por consulta:
+Não remover necessariamente o sistema sintético imediatamente se testes históricos dependem dele.
+
+Mas veículos com:
 
 ```text
-visited_nodes
-relaxed_edges
-heap_pushes
+FollowingRoute
 ```
 
-Não precisam fazer parte do resultado normal se isso prejudicar a API.
+devem usar movement sobre a rede.
 
-Pode existir:
+Veículos fora da rede podem continuar utilizando comportamento anterior apenas se isso simplificar compatibilidade.
 
-```rust
-RouteDiagnostics
-```
+Documentar claramente os dois modos temporários.
 
-ou modo específico para benchmark.
-
-Essas métricas serão importantes para entender gargalos.
+Se for simples remover a movimentação sintética de veículos reais sem quebrar benchmarks históricos, isso também é aceitável.
 
 ---
 
-# 30. Snapshot da rede
+# 24. Travel budget
 
-Adicionar ao sistema de snapshots suporte opcional a transporte.
-
-O snapshot pode incluir:
+Movement usa:
 
 ```text
-network_revision
-nodes
-edges
+travel_budget = speed × tick_ms
 ```
 
-Não copiar a rede automaticamente.
+com aritmética inteira.
 
-Criar seleção explícita.
+Exemplo:
 
-Algo equivalente a:
+```text
+speed = 30 units/ms
+tick = 20 ms
 
-```rust
-TransportSnapshotRequest {
-    include_nodes: bool,
-    include_edges: bool,
-    known_revision: Option<u64>,
-}
+travel_budget = 600 units
+```
+
+---
+
+# 25. Consumindo edges
+
+Se:
+
+```text
+remaining edge length > travel_budget
+```
+
+então:
+
+```text
+edge_progress += travel_budget
 ```
 
 Se:
 
 ```text
-known_revision == current_revision
+travel_budget >= remaining edge length
 ```
 
-nenhum dado pesado precisa ser retornado.
-
----
-
-# 31. Representação de snapshot
-
-Criar estruturas semelhantes a:
-
-```rust
-TransportNodeSnapshot {
-    id,
-    position,
-}
-
-TransportEdgeSnapshot {
-    id,
-    from,
-    to,
-    mode,
-    base_cost,
-    enabled,
-}
-```
-
-Snapshot não deve expor slots internos.
-
----
-
-# 32. Checksum
-
-Atualizar checksum para nova versão:
+então:
 
 ```text
-federation-state-v3
-```
-
-Adicionar:
-
-```text
-next node id
-next edge id
-network revision
-node state
-edge state
-```
-
-A ordem deve ser estável.
-
-Incluir:
-
-```text
-alive/tombstone state
-```
-
-porque remoções fazem parte do estado.
-
-Não incluir:
-
-```text
-RoutingWorkspace
-route results
-snapshot buffers
-benchmark metrics
+finish edge
+move to next node
+subtract consumed distance
+continue
 ```
 
 ---
 
-# 33. Commands pendentes
+# 26. Múltiplas edges no mesmo tick
 
-Como no Marco 002, comandos pendentes continuam entrando no checksum.
-
-Novos Commands de transporte também devem ser serializados deterministicamente no checksum da fila.
-
----
-
-# 34. Testes obrigatórios — Network
-
-Adicionar testes para:
-
-1. criação de node;
-2. criação de edge;
-3. duas directed edges para simular mão dupla;
-4. múltiplas edges entre os mesmos nodes;
-5. road e rail coexistindo;
-6. edge com node inexistente rejeitada;
-7. edge com custo zero rejeitada;
-8. self-loop rejeitado;
-9. remoção de edge;
-10. remoção de node sem edges;
-11. remoção de node com edges rejeitada;
-12. IDs não reutilizados.
-
----
-
-# 35. Testes obrigatórios — Commands
-
-Testar:
+Um veículo rápido deve poder atravessar:
 
 ```text
-Create A
-Create B
-Create A→B
+edge A
+edge B
+edge C
 ```
 
 no mesmo tick.
 
-Testar também:
+Não limitar artificialmente a:
 
 ```text
-Create invalid edge
-Create valid edge afterward
+1 edge por tick
 ```
 
-O comando inválido não deve impedir os seguintes.
+Isso tornaria simulação dependente do tamanho das edges.
 
 ---
 
-# 36. Testes obrigatórios — Revision
+# 27. Proteção contra loops
 
-Testar:
+Embora rotas produzidas pelo Dijkstra não devam conter ciclos positivos, proteger o movement contra dados corrompidos.
+
+Adicionar limite defensivo de edges consumidas por veículo em um único tick.
+
+Esse limite deve ser um **safety guard**, não regra de gameplay.
+
+Se acionado:
+
+- retornar/registrar erro determinístico;
+- não ficar em loop infinito.
+
+---
+
+# 28. Interpolação da posição
+
+Ao percorrer uma edge, atualizar posição X/Y/Z do veículo usando interpolação inteira entre:
 
 ```text
-create node → revision +1
-create edge → +1
-disable edge → +1
-disable already disabled → unchanged
-same cost → unchanged
-remove edge → +1
+from position
+to position
+```
+
+baseada em:
+
+```text
+edge_progress / physical_length
+```
+
+Evitar floating point autoritativo.
+
+Usar aritmética inteira segura.
+
+---
+
+# 29. Renderer futuro
+
+A posição calculada deve ser suficientemente precisa para um renderer futuro.
+
+Não implementar interpolação gráfica frame-a-frame.
+
+O renderer poderá futuramente interpolar entre snapshots.
+
+---
+
+# 30. Arrival
+
+Ao consumir a última edge:
+
+```text
+movement_state = Arrived
+current_node = destination
+```
+
+O veículo deve parar exatamente na posição do node destino.
+
+---
+
+# 31. Empty route
+
+Para:
+
+```text
+origin == destination
+```
+
+um RoutePlan pode possuir:
+
+```text
+edges = []
+```
+
+Atribuí-lo deve resultar imediatamente em:
+
+```text
+Arrived
+```
+
+ou comportamento equivalente claramente documentado.
+
+---
+
+# 32. Validação lazy de edges
+
+Antes de entrar na próxima edge:
+
+validar:
+
+```text
+edge alive
+edge enabled
+mode compatible
+edge.from == current node
+```
+
+Se qualquer condição falhar:
+
+```text
+movement_state = NeedsRoute
+```
+
+O veículo permanece no node atual.
+
+---
+
+# 33. Edge removida enquanto veículo está nela
+
+Regra inicial:
+
+> Veículo que já entrou numa edge pode concluir essa edge mesmo que ela seja removida/desabilitada durante o percurso.
+
+Motivos:
+
+- evita teleport;
+- evita estado espacial impossível;
+- simplifica consistência.
+
+A validação ocorre **antes de entrar na próxima edge**.
+
+Registrar isso explicitamente em documentação.
+
+---
+
+# 34. Rota alterada distante
+
+Se uma edge futura ainda não alcançada continua válida, nenhuma ação acontece.
+
+Não comparar simplesmente:
+
+```text
+route.network_revision != network.revision
+```
+
+para invalidar a rota.
+
+---
+
+# 35. Re-routing
+
+Não executar Dijkstra automaticamente dentro do Movement.
+
+Quando route fica inválida:
+
+```text
+NeedsRoute
+```
+
+é produzido.
+
+Outro sistema futuro será responsável por criar nova rota.
+
+---
+
+# 36. Eventos de movement
+
+Criar estrutura leve de eventos ou resultados para casos importantes.
+
+Exemplos:
+
+```text
+VehicleArrived
+VehicleNeedsRoute
+```
+
+Não criar event bus genérico complexo.
+
+Pode ser buffer por tick.
+
+---
+
+# 37. Determinismo
+
+Movement deve produzir mesmo resultado com:
+
+```text
+1
+2
+4
+8 threads
+```
+
+para o mesmo:
+
+```text
+world
+commands
+routes
+ticks
 ```
 
 ---
 
-# 37. Testes obrigatórios — Routing
+# 38. Paralelismo
 
-Criar redes pequenas verificáveis manualmente.
+Veículos seguindo rotas devem continuar sendo atualizados em paralelo.
+
+A rede é leitura compartilhada.
+
+RoutePlans também devem ser somente leitura durante Movement.
+
+Cada worker escreve apenas nos slots dos veículos que possui.
+
+---
+
+# 39. Sem locks por veículo
+
+Proibido:
+
+```text
+Mutex<Vehicle>
+Arc<Mutex<RoutePlan>>
+```
+
+Não introduzir locks por entidade.
+
+---
+
+# 40. RoutePlan imutável durante uso
+
+Depois de criado:
+
+```text
+RoutePlan
+```
+
+deve ser imutável.
+
+Para mudar rota:
+
+```text
+assign another RoutePlanId
+```
+
+Não editar sequência de edges em um RoutePlan já existente.
+
+---
+
+# 41. RoutePlans compartilháveis
+
+Projetar para permitir:
+
+```text
+Vehicle A ─┐
+Vehicle B ─┼── RoutePlan #32
+Vehicle C ─┘
+```
+
+Mesmo se benchmarks deste marco criarem uma rota por veículo.
+
+---
+
+# 42. Reference count
+
+Não implementar reference count sofisticado.
+
+RoutePlans podem permanecer armazenados indefinidamente neste marco.
+
+Documentar potencial crescimento de memória.
+
+Cleanup será tratado futuramente.
+
+---
+
+# 43. Checksum v4
+
+Atualizar marcador:
+
+```text
+federation-state-v4
+```
+
+Adicionar estado autoritativo novo:
+
+```text
+RoutePlans
+next RoutePlanId
+vehicle movement state
+route_plan assignment
+edge index
+edge progress
+network speed
+current logical node
+```
+
+Não incluir:
+
+```text
+routing workspaces
+movement diagnostics
+temporary event buffers
+snapshots
+```
+
+---
+
+# 44. Commands pendentes
+
+Novos comandos também devem entrar deterministicamente no checksum enquanto pendentes.
+
+---
+
+# 45. Snapshot de veículos
+
+Expandir `VehicleSnapshot`.
+
+Adicionar o necessário para debugging/render futuro:
+
+```text
+movement_state
+route_plan_id
+current_edge
+edge_progress
+current_node
+x
+y
+z
+speed
+```
+
+Evitar expor detalhes internos como array slots.
+
+---
+
+# 46. Snapshot de RoutePlans
+
+Adicionar seleção opcional.
+
+Não enviar todos automaticamente.
+
+Criar request semelhante a:
+
+```text
+RoutePlanSelection::None
+RoutePlanSelection::Ids(...)
+```
+
+É suficiente.
+
+Não implementar sincronização incremental sofisticada de route plans.
+
+RoutePlans são imutáveis.
+
+---
+
+# 47. Benchmark novo — routed movement
+
+Criar benchmark separado.
+
+Não misturar com:
+
+```text
+synthetic movement benchmark
+routing benchmark
+```
+
+Nome sugerido:
+
+```text
+federation-routed-movement-bench
+```
+
+---
+
+# 48. Cenário de benchmark
+
+Criar uma rede determinística como grid.
+
+Exemplo inicial:
+
+```text
+128 × 128 nodes
+```
+
+Criar:
+
+```text
+100k vehicles
+```
+
+ou quantidade configurável.
+
+Não executar Dijkstra durante a medição.
+
+As rotas devem ser geradas/preparadas antes.
+
+---
+
+# 49. Rotas de benchmark
+
+Utilizar conjunto reutilizável de RoutePlans.
 
 Exemplo:
 
 ```text
-A --5--> B --5--> D
- \               ↑
-  \--20--> C ----/
+1.000 route plans
+100.000 vehicles
 ```
 
-O algoritmo deve escolher:
+com veículos distribuídos entre esses planos.
+
+Isso mede justamente nossa capacidade futura de compartilhar rotas.
+
+Também permitir configuração:
 
 ```text
-A → B → D
+unique route per vehicle
 ```
 
-quando apropriado.
+para comparação de memória/custo, se simples.
+
+---
+
+# 50. O que medir
+
+Medir:
+
+```text
+tick mean
+p50
+p95
+p99
+vehicles updated/s
+edge transitions/s
+arrivals/s
+```
+
+Também registrar:
+
+```text
+vehicles
+route plans
+average edges per route
+memory estimate
+```
+
+---
+
+# 51. Benchmark por threads
+
+Testar:
+
+```text
+1
+2
+4
+8
+12
+16
+```
+
+quando configurado.
+
+Comparar checksum final.
+
+---
+
+# 52. Benchmark sem routing
+
+O benchmark routed movement deve medir:
+
+```text
+consumo de rotas
+```
+
+não pathfinding.
+
+Routing já possui benchmark separado.
+
+---
+
+# 53. Benchmark de invalidation
+
+Adicionar cenário secundário pequeno.
+
+Durante simulação:
+
+```text
+disable/remove selected edges
+```
+
+e medir:
+
+```text
+vehicles entering NeedsRoute
+```
+
+Não recalcular rotas.
+
+Objetivo:
+
+provar lazy invalidation.
+
+---
+
+# 54. Testes obrigatórios — length
 
 Cobrir:
 
-1. rota simples;
-2. origem = destino;
-3. destino inalcançável;
-4. directed edge;
-5. edge disabled;
-6. modo incorreto;
-7. múltiplas edges;
-8. rota de menor custo;
-9. route cost grande sem overflow;
-10. rede alterada mudando a rota.
+1. comprimento horizontal;
+2. vertical;
+3. diagonal;
+4. diferença de Z;
+5. nodes distintos nunca gerando comprimento zero;
+6. valores grandes sem overflow;
+7. resultado determinístico.
 
 ---
 
-# 38. Tie-breaking
+# 55. Testes obrigatórios — RoutePlan
 
-Criar cenário:
+Cobrir:
+
+1. criação;
+2. ID estável;
+3. edge sequence preservada;
+4. múltiplos veículos usando mesmo plan;
+5. origin = destination;
+6. plan imutável.
+
+---
+
+# 56. Testes obrigatórios — Vehicle movement
+
+Cobrir:
+
+1. entrar em uma edge;
+2. movimento parcial;
+3. terminar edge;
+4. mudar para edge seguinte;
+5. atravessar múltiplas edges no mesmo tick;
+6. chegada;
+7. posição final exatamente no destino;
+8. progress nunca exceder length.
+
+---
+
+# 57. Testes obrigatórios — lazy invalidation
+
+Cobrir:
+
+### Caso A
+
+Rota:
 
 ```text
-A → B → D
-A → C → D
+A → B → C
 ```
 
-com custo total idêntico.
+Veículo está em:
 
-Executar repetidamente.
+```text
+A → B
+```
 
-Resultado deve ser sempre igual.
+Remover:
 
-Executar com diferentes quantidades de threads quando aplicável.
+```text
+B → C
+```
+
+Comportamento:
+
+```text
+conclui A → B
+chega B
+NeedsRoute
+```
+
+### Caso B
+
+Modificar edge em outra parte da rede.
+
+Veículo continua normalmente.
+
+### Caso C
+
+Desabilitar edge atual.
+
+Veículo termina edge atual.
 
 ---
 
-# 39. Determinismo completo
+# 58. Testes obrigatórios — edge consistency
 
-Construir um cenário com:
+Ao tentar entrar em edge cujo:
 
 ```text
-seed fixa
-network commands
-vehicle commands
-terrain commands
-routing
+from != current node
+```
+
+marcar:
+
+```text
+NeedsRoute
+```
+
+Não teleportar.
+
+---
+
+# 59. Testes obrigatórios — determinismo
+
+Criar cenário com:
+
+```text
+network
+route plans
+1000+ vehicles
+commands
+edge invalidation
+multiple ticks
 ```
 
 Executar com:
@@ -1147,314 +1332,192 @@ Comparar:
 
 ```text
 checksum
-network snapshot
-routes
-command results
-```
-
-Tudo deve coincidir.
-
----
-
-# 40. Benchmark de routing
-
-Adicionar benchmark separado do movimento.
-
-Preferencialmente como outro binário dentro de:
-
-```text
-federation-bench
-```
-
-por exemplo:
-
-```text
-federation-route-bench
-```
-
-Não criar nova crate sem necessidade.
-
----
-
-# 41. Gerador sintético de rede
-
-Criar redes determinísticas em grid.
-
-Exemplo:
-
-```text
-128 × 128 nodes
-```
-
-com conexões bidirecionais horizontais e verticais.
-
-Isso gera aproximadamente:
-
-```text
-16k nodes
-~65k directed edges
-```
-
-Também permitir cenários maiores como:
-
-```text
-256 × 256
-```
-
-Não fixar esses números como limites.
-
----
-
-# 42. Queries sintéticas
-
-Gerar pares determinísticos:
-
-```text
-origin
-destination
-```
-
-a partir de seed.
-
-Evitar apenas rotas triviais próximas.
-
-O benchmark deve incluir distâncias variadas.
-
----
-
-# 43. Benchmark serial
-
-Medir:
-
-```text
-route latency
-routes/s
-```
-
-e:
-
-```text
-P50
-P95
-P99
-```
-
-Também agregar:
-
-```text
-visited nodes
-relaxed edges
-```
-
-se as métricas existirem.
-
----
-
-# 44. Benchmark paralelo
-
-Independent route queries podem ser executadas em paralelo.
-
-Usar:
-
-```text
-1
-2
-4
-8
-12
-16
-```
-
-threads quando configurado.
-
-A rede deve ser compartilhada somente para leitura.
-
-Cada worker deve possuir seu próprio:
-
-```text
-RoutingWorkspace
-```
-
-Não usar mutex global.
-
-Uma opção aceitável é:
-
-```rust
-rayon::par_iter()
-    .map_init(RoutingWorkspace::new, ...)
-```
-
-ou equivalente.
-
----
-
-# 45. Determinismo do benchmark
-
-As queries devem possuir ordem/index original.
-
-Mesmo quando processadas em paralelo:
-
-```text
-result[i]
-```
-
-deve corresponder à:
-
-```text
-query[i]
-```
-
-Criar checksum dos resultados.
-
-Todos os thread counts devem produzir o mesmo checksum.
-
----
-
-# 46. O que medir
-
-Relatório JSON deve incluir pelo menos:
-
-```text
-nodes
-edges
-queries
-threads
-runs
-mean_ms_per_route
-median
-p95
-p99
-routes_per_second
-speedup
-route_output_checksum
-```
-
-Se disponível:
-
-```text
-average_visited_nodes
-average_relaxed_edges
+vehicle snapshots
+movement events
 ```
 
 ---
 
-# 47. Benchmark não estabelece meta ainda
+# 60. Tests com network revision
 
-Não criar critérios como:
+Criar alteração na rede que incremente revisão sem tocar rota do veículo.
+
+Confirmar:
 
 ```text
-100k rotas devem rodar em X ms
+vehicle continues
 ```
 
-neste marco.
-
-Primeiro precisamos obter baseline.
-
-Documentar:
-
-> benchmark sintético de grid não representa uma cidade real.
+Isso deve ser teste obrigatório para impedir regressão futura.
 
 ---
 
-# 48. Não implementar route cache ainda
+# 61. RoutingWorkspace documentation
 
-Não implementar cache persistente de rotas.
-
-Primeiro medir custo bruto.
-
-A única informação para futuro cache é:
+Adicionar ao README/docs explicitamente:
 
 ```text
-network_revision
+RoutingWorkspace count
+≈ routing worker count
 ```
 
-Um futuro cache poderá usar algo como:
+e não:
 
 ```text
-(origin, destination, mode, revision)
+vehicle count
+citizen count
 ```
 
-mas não implementar agora.
+Registrar a justificativa de memória.
 
 ---
 
-# 49. Não implementar A* ainda
+# 62. Route recalculation documentation
 
-Dijkstra será nosso baseline.
-
-Depois dos benchmarks poderemos comparar:
+Registrar:
 
 ```text
-Dijkstra
+Decision frequency != movement frequency
+```
+
+Movimento pode executar frequentemente.
+
+Routing é event-driven / periódico quando necessário.
+
+Essa regra deve aparecer em:
+
+```text
+docs/architecture.md
+docs/transport-network.md
+AGENTS.md
+```
+
+---
+
+# 63. Registro do benchmark do Marco 003
+
+Não apagar resultados existentes.
+
+Adicionar interpretação formal:
+
+- Dijkstra é baseline correto;
+- exploração cresce significativamente com rede;
+- não usar pathfinding contínuo;
+- throughput paralelo cresce enquanto latência individual também cresce;
+- otimizações serão avaliadas depois.
+
+---
+
+# 64. A* e hierarchical routing continuam fora do escopo
+
+Não implementar ainda:
+
+```text
 A*
-hierarchical routing
-contraction hierarchies
-sector graph
-route caching
+CH
+HPA*
+sector routing
+route cache
 ```
 
-Não escolher antecipadamente.
+O Marco 003.5 mede movimento, não otimização de routing.
 
 ---
 
-# 50. Não implementar traffic simulation
+# 65. Não implementar citizens
+
+Não criar:
+
+```text
+Citizen
+Household
+Employment
+Commute
+```
+
+ainda.
+
+Esse será o Marco 004.
+
+---
+
+# 66. Não implementar cargo
+
+Não criar:
+
+```text
+Cargo
+Inventory
+TruckLoad
+Factory
+```
+
+ainda.
+
+---
+
+# 67. Não implementar traffic interactions
+
+Não implementar:
+
+```text
+vehicle collision
+following distance
+lane occupancy
+intersection queues
+traffic lights
+priority
+congestion
+```
+
+Vários veículos podem ocupar logicamente a mesma edge.
+
+---
+
+# 68. Não implementar lanes
+
+Uma edge continua representando conexão lógica.
+
+Lane model virá depois, se necessário.
+
+---
+
+# 69. Não implementar fuel
+
+Sem consumo de combustível neste marco.
+
+---
+
+# 70. Não implementar acceleration
+
+Velocidade pode permanecer constante.
 
 Não adicionar:
 
 ```text
-vehicle following
-lane changing
-signals
-intersection reservation
-traffic density
-congestion
-queueing
-accidents
-parking
+acceleration
+braking
+vehicle physics
 ```
-
-Isso não pertence ao Marco 003.
 
 ---
 
-# 51. Não conectar veículos às rotas ainda
+# 71. Não implementar renderer
 
-Os veículos atuais continuam com movimento sintético.
-
-Não modificar:
+Nenhuma dependência:
 
 ```text
-Vehicles::move_parallel()
+wgpu
+winit
+Godot
+Bevy
 ```
 
-para seguir edges.
-
-Isso será trabalho posterior.
-
-O Marco 003 deve provar a rede e routing isoladamente primeiro.
+entra no core.
 
 ---
 
-# 52. Não implementar construção visual de estradas
-
-Ainda não implementar:
-
-```text
-road tiles
-curves
-junction meshes
-terrain cutting
-bridge meshes
-rail meshes
-```
-
-A rede neste marco é **lógica**.
-
-O renderer virá posteriormente.
-
----
-
-# 53. Documentação
+# 72. Documentação obrigatória
 
 Atualizar:
 
@@ -1462,55 +1525,79 @@ Atualizar:
 README.md
 AGENTS.md
 docs/architecture.md
+docs/transport-network.md
 docs/benchmarks.md
 ```
 
-Criar, se útil:
+Criar se útil:
 
 ```text
-docs/transport-network.md
+docs/vehicle-routing.md
 ```
 
 ---
 
-# 54. Documentar decisões
+# 73. README — registrar visão
 
-Explicar:
+Adicionar seção resumindo a arquitetura atual:
 
-- directed multigraph;
-- IDs estáveis;
-- tombstones;
-- node coordinates;
-- z independente;
-- Road/Rail;
-- global network revision;
-- Dijkstra baseline;
-- deterministic tie-breaking;
-- RoutingWorkspace;
-- ausência deliberada de cache;
-- ausência deliberada de congestionamento.
+```text
+Simulation
+├── Terrain
+├── Vehicles
+├── Transport Network
+├── Routing
+└── Route Execution
+```
 
----
+Explicar que:
 
-# 55. AGENTS.md
-
-Adicionar regras:
-
-- Nunca assumir que dois nodes com mesma posição estão conectados.
-- Nunca assumir edge bidirecional.
-- Bidirectional transport requires two edges.
-- Nunca usar `(from,to)` como identity de edge.
-- Routing deve usar integer costs.
-- RoutingWorkspace não é estado autoritativo.
-- Routing output deve ser determinístico.
-- Alterações na rede devem ocorrer via Commands.
-- Toda mudança que afeta routing deve atualizar network revision.
-- Não adicionar cache sem benchmark.
-- Não adicionar heurística A* sem provar admissibilidade.
+- routing calcula;
+- RoutePlan armazena;
+- movement executa;
+- routing não ocorre a cada tick.
 
 ---
 
-# 56. CI
+# 74. Architecture docs — regras permanentes
+
+Registrar explicitamente:
+
+> `base_cost` is routing cost, not physical length.
+
+> Network revision changes do not automatically invalidate every route.
+
+> Vehicles validate route edges lazily.
+
+> Vehicles may finish an edge they already entered even if it is later disabled or removed.
+
+> Routing workspaces belong to routing workers, never to agents.
+
+> Route plans are immutable and designed to be shareable.
+
+> Pathfinding and movement run at different frequencies.
+
+---
+
+# 75. AGENTS.md — regras para futuros agentes
+
+Adicionar:
+
+- Do not perform pathfinding inside vehicle movement.
+- Do not allocate a `RoutingWorkspace` per agent.
+- Do not use `base_cost` as physical distance.
+- Do not invalidate every route when network revision changes.
+- Validate future route edges lazily.
+- A vehicle already on an edge may complete it.
+- RoutePlans must remain immutable after creation.
+- Multiple vehicles may reference one RoutePlan.
+- Movement must remain integer/fixed-point authoritative state.
+- Do not introduce lane/congestion systems without a dedicated milestone.
+- Do not add routing optimizations without benchmarks.
+
+---
+
+# 76. CI
 
 Preservar:
 
@@ -1521,216 +1608,204 @@ cargo test --workspace --locked
 cargo build --workspace --release --locked
 ```
 
-Routing benchmarks pesados não entram na CI.
-
-Testes pequenos de routing entram normalmente.
+Benchmarks pesados permanecem fora da CI.
 
 ---
 
-# 57. Critérios de aceitação
+# 77. Critérios de aceitação
 
-O Marco 003 estará concluído quando:
+O Marco 003.5 estará concluído quando:
 
-- [ ] `dirty` não fizer mais parte do checksum;
-- [ ] storage interno deixar de ser API pública principal;
-- [ ] snapshots possuírem metadata regional;
-- [ ] existirem `TransportNodeId` e `TransportEdgeId`;
-- [ ] IDs forem estáveis e não reutilizados;
-- [ ] existir directed multigraph;
-- [ ] múltiplas edges entre nodes forem possíveis;
-- [ ] Road e Rail existirem como modos;
-- [ ] nodes possuírem X/Y/Z inteiros;
-- [ ] edges possuírem custo inteiro;
-- [ ] rede for editável somente por Commands externos;
-- [ ] commands dependentes puderem rodar no mesmo tick;
-- [ ] rede possuir revision;
-- [ ] alterações efetivas atualizarem revision;
-- [ ] Dijkstra encontrar menor custo;
-- [ ] tie-breaking for determinístico;
-- [ ] edge disabled não for roteável;
-- [ ] routing respeitar modo;
-- [ ] RoutingWorkspace for reutilizável;
-- [ ] múltiplos workspaces puderem consultar a mesma rede;
-- [ ] snapshots opcionais da rede existirem;
-- [ ] checksum v3 incluir estado autoritativo da rede;
-- [ ] determinismo passar em 1/2/4/8 threads;
-- [ ] benchmark serial de routing existir;
-- [ ] benchmark paralelo de routing existir;
-- [ ] resultados paralelos possuírem checksum idêntico;
-- [ ] documentação estiver atualizada;
-- [ ] CI continuar verde.
+- [ ] edge possuir comprimento físico separado de `base_cost`;
+- [ ] comprimento for determinístico e integer-based;
+- [ ] existir `RoutePlan`;
+- [ ] existir `RoutePlanId`;
+- [ ] RoutePlans forem imutáveis;
+- [ ] RoutePlans puderem ser compartilhados por veículos;
+- [ ] veículos tiverem estado explícito de network movement;
+- [ ] veículos puderem receber RoutePlan via command;
+- [ ] veículos avançarem parcialmente numa edge;
+- [ ] veículos cruzarem múltiplas edges no mesmo tick;
+- [ ] veículos chegarem exatamente ao node destino;
+- [ ] edge futura inválida produzir `NeedsRoute`;
+- [ ] alteração distante da rede não invalidar rota válida;
+- [ ] edge atual removida/desabilitada puder ser concluída;
+- [ ] routing não rodar dentro de Movement;
+- [ ] movement continuar paralelo;
+- [ ] não existir lock por veículo;
+- [ ] checksum v4 incluir novo estado autoritativo;
+- [ ] snapshots mostrarem estado de movimento;
+- [ ] determinismo passar com 1/2/4/8 threads;
+- [ ] benchmark routed movement existir;
+- [ ] benchmark não incluir Dijkstra no hot path;
+- [ ] lazy invalidation possuir benchmark/teste;
+- [ ] regras arquiteturais forem registradas na documentação;
+- [ ] CI permanecer verde.
 
 ---
 
-# 58. Processo de implementação
+# 78. Processo recomendado
 
-Executar aproximadamente nesta ordem:
+Executar nesta ordem:
 
-1. revisar Marco 002;
-2. corrigir checksum dirty;
-3. restringir getters internos;
-4. adicionar snapshot metadata;
-5. criar IDs de transporte;
-6. criar `TransportNetwork`;
-7. implementar node storage;
-8. implementar edge storage;
-9. implementar adjacency;
-10. implementar revision;
-11. adicionar commands;
-12. adicionar ID allocation;
-13. testar edição da rede;
-14. implementar Dijkstra;
-15. implementar tie-breaking;
-16. implementar RoutingWorkspace;
-17. adicionar snapshots;
-18. atualizar checksum v3;
-19. criar testes de routing;
-20. testar determinismo;
-21. criar route benchmark;
-22. executar benchmarks;
-23. documentar resultados;
-24. executar fmt/clippy/test/build;
-25. corrigir todas as falhas;
-26. entregar relatório final.
+1. revisar Marco 003;
+2. registrar regras arquiteturais na documentação;
+3. adicionar physical edge length;
+4. testar cálculo de comprimento;
+5. criar `RoutePlanId`;
+6. criar storage de RoutePlans;
+7. definir persistência determinística de RoutePlan;
+8. adicionar estado de movement aos veículos;
+9. adicionar assignment por command;
+10. implementar movement em uma edge;
+11. implementar transição entre edges;
+12. implementar múltiplas edges/tick;
+13. implementar arrival;
+14. implementar lazy validation;
+15. implementar `NeedsRoute`;
+16. adicionar movement events;
+17. paralelizar movement preservando ownership;
+18. atualizar checksum v4;
+19. atualizar snapshots;
+20. escrever testes;
+21. criar routed movement benchmark;
+22. criar invalidation scenario;
+23. rodar benchmarks;
+24. atualizar docs com resultados reais;
+25. rodar fmt/clippy/test/build;
+26. corrigir falhas;
+27. entregar relatório final.
 
 ---
 
-# 59. Formato da entrega
+# 79. Entrega final
 
-Apresentar:
+Responder com:
 
 ## A. Resumo
 
 O que foi implementado.
 
-## B. Arquitetura da rede
+## B. Movement architecture
 
-Mostrar estrutura conceitual:
-
-```text
-Nodes
-Edges
-Adjacency
-Revision
-RoutingWorkspace
-```
-
-## C. API pública
-
-Mostrar exemplos de:
+Explicar:
 
 ```text
-create nodes
-create edges
-find route
-network snapshot
+Route
+↓
+RoutePlan
+↓
+Vehicle assignment
+↓
+edge progress
+↓
+arrival / NeedsRoute
 ```
 
-## D. Determinismo
+## C. Data layout
 
-Mostrar os testes executados.
+Mostrar novos arrays/campos dos veículos e storage dos RoutePlans.
 
-## E. Routing benchmark
+## D. Physical length
 
-Tabela real contendo:
+Explicar cálculo e proteção contra overflow.
+
+## E. Lazy invalidation
+
+Mostrar comportamento real com edge removida/desabilitada.
+
+## F. Determinismo
+
+Listar testes e resultados entre contagens de threads.
+
+## G. Performance
+
+Apresentar benchmark routed movement:
 
 ```text
 threads
-latency
-routes/s
-speedup
+vehicles
+route plans
+tick time
+vehicles/s
+edge transitions/s
 ```
 
-Não inventar resultados.
+## H. Memória
 
-## F. Complexidade observada
-
-Informar:
+Apresentar estimativa ou medição aproximada para:
 
 ```text
-nodes visited
-edges relaxed
+vehicles
+route plans
+movement state
 ```
 
-quando disponível.
+Não inventar valores.
 
-## G. Limitações
+## I. Limitações
 
-Explicar claramente:
+Reforçar:
 
 ```text
-no congestion
 no lanes
-no vehicle routing
-no cache
-no A*
+no congestion
+no acceleration
+no automatic rerouting
+no public transit
+no citizen simulation
 ```
 
-## H. Riscos
+## J. Próximo marco
 
-Apontar estruturas que podem precisar ser revistas quando houver:
+Avaliar readiness para:
 
 ```text
-100k+ route queries
-network edits
-traffic
-hierarchical routing
+MARCO 004 — Employment, Households & Commute Demand
 ```
 
-## I. Próximo marco sugerido
-
-Não implementar automaticamente.
-
-Avaliar se a arquitetura está pronta para:
-
-```text
-MARCO 004
-COMMUTING, EMPLOYMENT & TRIP DEMAND
-```
-
-ou se antes é necessário um marco intermediário para:
-
-```text
-VEHICLES FOLLOWING NETWORK ROUTES
-```
+Não iniciar automaticamente.
 
 ---
 
-# 60. Princípio final deste marco
+# 80. Princípio final
 
-O Marco 003 deve provar:
-
-```text
-              TRANSPORT NETWORK
-
-Node ─────── Edge ─────── Node
- │                          │
- │                          │
- └──────── Routing ─────────┘
-
-           deterministic
-                +
-            measurable
-                +
-             editable
-```
-
-Ainda não estamos tentando simular trânsito.
-
-Estamos construindo a infraestrutura matemática que permitirá que, futuramente:
+Depois deste marco queremos provar:
 
 ```text
-casa
-  ↓
-ônibus
-  ↓
-estação
-  ↓
-trem
-  ↓
-fábrica
+ROUTING
+   ↓
+RoutePlan
+   ↓
+Vehicle
+   ↓
+Physical Network Movement
 ```
 
-seja uma sequência real de decisões e rotas dentro de uma única região simulada.
+sem transformar:
 
-O objetivo do Marco 003 é descobrir se conseguimos fazer isso de forma correta, determinística e rápida antes de adicionar centenas de milhares de agentes sobre a rede.
+```text
+pathfinding
+```
+
+em:
+
+```text
+per-agent-per-tick work
+```
+
+A arquitetura deve permitir que futuramente:
+
+```text
+Citizen
+   ↓
+TripRequest
+   ↓
+RoutePlan
+   ↓
+Vehicle / Public Transport
+```
+
+seja adicionado sem reescrever a fundação de transporte.
+
+O Marco 003.5 deve demonstrar que a rede não serve apenas para responder "qual é o caminho?", mas também consegue sustentar milhares ou centenas de milhares de entidades realmente consumindo esses caminhos de forma determinística e eficiente.

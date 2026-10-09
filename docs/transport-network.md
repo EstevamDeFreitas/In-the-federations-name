@@ -1,5 +1,15 @@
 # Transport Network & Routing Foundation — Marco 003
 
+## Regras de execução — Marco 003.5
+
+RoutingWorkspace count ≈ routing worker count, nunca vehicle/citizen count: scratch
+é proporcional à rede. Pathfinding não roda continuamente; ocorre por nova demanda,
+destino, invalidação ou replanning explícito. Decision frequency != movement frequency.
+`base_cost` is routing cost, not physical length. Revisão global é provisória e não
+obriga agentes a recalcular. Vehicles validate route edges lazily; vehicles may finish
+an edge they already entered even if it is later disabled or removed. RoutePlans são
+imutáveis, centrais e compartilháveis. Movement não chama Dijkstra.
+
 ## Modelo e armazenamento
 
 A rede é um multigrafo direcionado lógico. Mão dupla exige duas arestas; `(from,to)`
@@ -141,16 +151,20 @@ assert_eq!(snapshot.transport.unwrap().edges.len(), 1);
 # }
 ```
 
-## Limitações e próximo marco
+## Execução de veículos e próximos marcos
 
-O benchmark de grid não representa uma cidade real. Não há congestionamento, lanes,
-semáforos, cache, A* ou veículos seguindo rotas. O movimento sintético permanece
-inalterado. Uma consulta representa um modo apenas; baldeações exigirão uma política
-futura. Z identifica posição, mas não determina conectividade ou custo automaticamente.
+O Marco 003.5 implementa consumo de planos e posição física inteira; veja
+[vehicle-routing.md](vehicle-routing.md). Arestas incluem physical_length Manhattan 3D,
+calculado na criação e mantido nos tombstones. Comprimento é separado de base_cost.
+Dijkstra não mudou de função: calcula rotas somente quando solicitado.
 
-Antes de commuting/employment/trip demand, recomenda-se um marco intermediário
-de veículos seguindo rotas: progresso na aresta, unidades de velocidade/custo,
-chegada, rotas invalidadas e política determinística de rerouting. O Marco 003 oferece
-a fronteira necessária, mas não implementa esse ciclo. Em 100k+ consultas, memória
-por workspace, exploração do Dijkstra, alocações do resultado, histórico de edições
-e invalidação global poderão exigir novos benchmarks e estruturas especializadas.
+Continuam fora do escopo congestionamento, lanes, semáforos, cache, A*, baldeações
+complexas e renderer. O movimento sintético é mantido apenas para veículos sem plano.
+Em 100k+ consultas, memória por worker, exploração do Dijkstra e histórico de edições
+continuam exigindo medições. O benchmark do Marco 003 mostrou aumento de exploração
+na grid maior e crescimento simultâneo de throughput e latência individual com mais
+threads: é um baseline correto, não justificativa para pathfinding contínuo. Otimizações
+serão avaliadas depois, mediante benchmarks próprios.
+
+O Marco 004 pode criar demanda e atribuir planos por comandos, mantendo frequência de
+routing distinta da frequência do movimento. Ele não foi iniciado automaticamente.

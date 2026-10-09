@@ -3,6 +3,10 @@ use crate::transport::{
     network::TransportNetwork,
 };
 use crate::{
+    MovementEvent, MovementMetrics, RouteExecutionMemoryEstimate, RoutePlanId,
+    route_plans::RoutePlans, scheduler::TickState,
+};
+use crate::{
     SimulationError,
     commands::{CommandError, CommandQueue, CommandResult, CommandSequence, SimulationCommand},
     config::SimulationConfig,
@@ -20,6 +24,7 @@ pub struct Simulation {
     ticks: u64,
     commands: CommandQueue,
     pub(crate) transport: TransportNetwork,
+    pub(crate) route_plans: RoutePlans,
 }
 
 impl Simulation {
@@ -36,18 +41,23 @@ impl Simulation {
             ticks: 0,
             commands: CommandQueue::default(),
             transport: TransportNetwork::default(),
+            route_plans: RoutePlans::default(),
         })
     }
     pub fn tick(&mut self) -> Result<(), SimulationError> {
         self.scheduler.tick(
-            &mut self.vehicles,
-            &mut self.terrain,
-            &mut self.commands,
-            &mut self.transport,
+            TickState {
+                vehicles: &mut self.vehicles,
+                terrain: &mut self.terrain,
+                commands: &mut self.commands,
+                network: &mut self.transport,
+                plans: &mut self.route_plans,
+                ticks: &mut self.ticks,
+            },
             &self.config,
-            &mut self.ticks,
         )
     }
+
     pub fn tick_count(&self) -> u64 {
         self.ticks
     }
@@ -108,6 +118,35 @@ impl Simulation {
         })?;
         Ok((edge_id, sequence))
     }
+    pub fn reserve_route_plan_id(&mut self) -> Result<RoutePlanId, CommandError> {
+        self.route_plans.reserve()
+    }
+    pub fn submit_store_route_plan(
+        &mut self,
+        route: Route,
+    ) -> Result<(RoutePlanId, CommandSequence), CommandError> {
+        let route_plan_id = self.reserve_route_plan_id()?;
+        let sequence = self.submit_command(SimulationCommand::StoreRoutePlan {
+            route_plan_id,
+            route,
+        })?;
+        Ok((route_plan_id, sequence))
+    }
+    pub fn movement_events(&self) -> &[MovementEvent] {
+        self.vehicles.events()
+    }
+    pub fn movement_metrics(&self) -> MovementMetrics {
+        self.vehicles.movement_metrics()
+    }
+    /// Allocated payload capacities only; excludes allocator overhead, terrain and network.
+    pub fn route_execution_memory_estimate(&self) -> RouteExecutionMemoryEstimate {
+        let mut estimate = self.vehicles.memory_estimate();
+        (
+            estimate.route_plan_records_bytes,
+            estimate.route_plan_edges_bytes,
+        ) = self.route_plans.memory_bytes();
+        estimate
+    }
     pub fn find_route(
         &self,
         request: RouteRequest,
@@ -117,9 +156,10 @@ impl Simulation {
     }
     pub fn checksum(&self) -> u64 {
         let mut hash = StableChecksum::new();
-        hash.bytes(b"federation-state-v3");
+        hash.bytes(b"federation-state-v4");
         self.commands.checksum(&mut hash);
         self.transport.checksum(&mut hash);
+        self.route_plans.checksum(&mut hash);
         for value in [
             u64::from(self.config.width),
             u64::from(self.config.height),
@@ -148,6 +188,7 @@ impl Simulation {
                 hash.bytes(&value.to_le_bytes());
             }
         }
+        self.vehicles.checksum_movement(&mut hash);
         hash.finish()
     }
 

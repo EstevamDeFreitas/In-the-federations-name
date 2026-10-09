@@ -21,6 +21,7 @@ pub struct TransportEdgeSnapshot {
     pub to: TransportNodeId,
     pub mode: TransportMode,
     pub base_cost: u64,
+    pub physical_length: u64,
     pub enabled: bool,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +70,7 @@ impl TransportNetwork {
                     to: data.to,
                     mode: data.mode,
                     base_cost: data.base_cost,
+                    physical_length: data.physical_length,
                     enabled: data.enabled,
                 });
             }

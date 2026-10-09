@@ -1,9 +1,20 @@
-# Arquitetura — Marco 003
+# Arquitetura — Marco 003.5
+
+## Decisões do Marco 003.5
+
+Routing calcula, RoutePlan armazena e Movement executa. Decision frequency != movement
+frequency: agentes não recalculam caminhos a cada tick. RoutingWorkspace pertence a
+workers de routing, nunca a agentes, pois seus arrays crescem com o tamanho da rede.
+`base_cost` é custo lógico, separado do comprimento físico. A revisão global é
+provisória e não dispara invalidação de todas as rotas. Veículos validam arestas
+futuras preguiçosamente e podem concluir uma aresta já iniciada, mesmo após remoção
+ou bloqueio. RoutePlans permanecem imutáveis e permitem compartilhamento. Não há
+rerouting automático dentro de Movement.
 
 ## Ownership e fronteira pública
 
 `Simulation` é a única proprietária do estado autoritativo mutável: configuração,
-heightmap, veículos SoA, fila de comandos, rede de transporte, pool Rayon e ticks. O core
+heightmap, veículos SoA, fila de comandos, rede de transporte, RoutePlans, pool Rayon e ticks. O core
 permanece headless e sem novas dependências. Getters de storage são `pub(crate)`; consumidores externos usam comandos, snapshots,
 diagnostics e routing. Os módulos de terreno e veículos também são privados.
 Não existe `Simulation::set_height`, setter público de velocidade ou acesso mutável
@@ -24,14 +35,19 @@ ID → slot permanece um detalhe interno temporário, encapsulado em `Vehicles::
 Não há remoção ou reutilização. Sparse sets, gerações e compactação poderão mudar
 essa associação sem alterar os comandos nem os snapshots.
 
-O armazenamento continua com cinco vetores contíguos: IDs e X/Y/VX/VY. Snapshot
-usa registros compactos por veículo; sua representação não define o armazenamento
-interno. Não há heap allocation individual por veículo.
+O armazenamento mantém os cinco vetores originais IDs e X/Y/VX/VY e acrescenta
+arrays Z, plano opcional, índice de aresta, progresso, estado, aresta atual opcional,
+nó lógico opcional e velocidade escalar. RoutePlans são registros centrais com
+sequências próprias de arestas, compartilhados por ID. Snapshot usa registros por
+veículo; sua representação não define o armazenamento interno. Não há heap
+allocation individual por veículo. Layout e estimativas em [vehicle-routing.md](vehicle-routing.md).
 
 ## Comandos: submissão, ordem e resultados
 
-`SimulationCommand` contém terreno, velocidade e seis comandos de transporte,
-descritos em [transport-network.md](transport-network.md).
+`SimulationCommand` contém terreno, velocidade sintética e seis comandos de transporte,
+descritos em [transport-network.md](transport-network.md), além de StoreRoutePlan,
+AssignVehicleRoute e SetVehicleNetworkSpeed. Persistência e atribuição acontecem em
+ApplyCommands; Movement recebe planos imutáveis.
 `submit_command` emite `CommandSequence`, começando em 1. A simulação aceita somente
 comandos sem sequência externa; não há API para inserir envelopes, duplicar ou
 reordenar sequências. A ordem FIFO é a ordem monotônica das chamadas de submissão.
@@ -64,8 +80,10 @@ escritas disjuntas e granularidade mínima de 1024 veículos; Finalize increment
 tick após a barreira. Mudanças de velocidade afetam Movement no mesmo tick.
 
 Cada tile tem 1024 unidades inteiras de posição. VX/VY são unidades/ms lógico;
-velocidades iniciais estão em −8..=8. O timestep padrão é 20 ms. Posições fazem
-wrap toroidal com resto euclidiano. Alturas não possuem escala física definida.
+velocidades sintéticas iniciais estão em −8..=8. O timestep padrão é 20 ms. Veículos
+sem plano fazem wrap toroidal com resto euclidiano. Veículos em rede usam velocidade
+escalar inteira, default 8 unidades/ms, e interpolação X/Y/Z sem wrap. Arrived e
+NeedsRoute permanecem parados. Alturas não possuem escala física definida.
 Essas unidades são provisórias e não definem a escala final do jogo.
 
 ## Terreno, snapshots e revisões
@@ -107,17 +125,21 @@ epoch nesta etapa. Limpar dirty não altera revisão nem os resultados increment
 Inicialização serial com SplitMix64 e movimento inteiro independente preservam
 resultados entre 1, 2, 4 e 8 threads. Ordem dos comandos não depende do Rayon.
 
-FNV-1a-64 v3 começa com `federation-state-v3`. Ordem dos campos:
+FNV-1a-64 v4 começa com `federation-state-v4`. A ordem herdada do v3 recebe
+comprimento físico por aresta, RoutePlans antes da configuração e estado de execução
+dos veículos ao final; detalhes em [vehicle-routing.md](vehicle-routing.md). Ordem dos campos:
 
 1. Próxima sequência e comprimento da fila (`u64`); envelopes em FIFO com sequência,
    tag e payload. Tags 0/1 são terreno/velocidade; 2/3 criação de nó/aresta; 4/5
    remoção de nó/aresta; 6 habilitação; 7 custo. Identidades são `u64`, posições e
    velocidades `i64`, altura `i32`, coordenadas de terreno convertidas para `u64`,
-   modo Road/Rail usa byte 0/1, custo é `u64` e enabled um byte 0/1.
+   modo Road/Rail usa byte 0/1, custo é `u64` e enabled um byte 0/1. Tags 8/9/10 são StoreRoutePlan,
+   AssignVehicleRoute e SetVehicleNetworkSpeed; Store serializa a Route completa.
 2. Próximos IDs de nó/aresta e revisão global (`u64`), quantidade de slots de nós,
    registros em ordem de identidade: ID, used/alive de um byte cada e posição X/Y/Z.
    Quantidade de slots de arestas, ID, alive e presença de dados, endpoints, modo,
-   custo e enabled. Reservas e tombstones permanecem representados.
+   custo, physical_length e enabled. Reservas e tombstones permanecem representados.
+   Em seguida entram próximo RoutePlanId, slots reservados, metadados e edges dos planos.
 3. Largura, altura, chunk size, tick ms, seed, ticks e quantidade de veículos como
    `u64`; alturas `i32` row-major; revisão `u64` por chunk; ID `u64` e X/Y/VX/VY
    `i64` por veículo. Campos inteiros usam little-endian.
@@ -125,9 +147,10 @@ FNV-1a-64 v3 começa com `federation-state-v3`. Ordem dos campos:
 Dirty não entra: é estado operacional, e limpar flags não altera checksum. Alturas
 e revisões continuam representadas. Adjacência e contagem de incidentes são índices
 derivados dos registros e não são serializados. Threads, snapshots, últimos resultados
-de comandos, RoutingWorkspace, rotas retornadas, capacidades e métricas são excluídos.
+de comandos, RoutingWorkspace, rotas retornadas não persistidas, capacidades, eventos
+temporários e métricas são excluídos.
 Filas e contadores de ID/sequência entram porque alteram comportamento futuro.
-Checksums históricos v1/v2 não são diretamente comparáveis ao v3. É um fingerprint
+Checksums históricos v1/v2/v3 não são diretamente comparáveis ao v4. É um fingerprint
 não criptográfico com possibilidade de colisão, calculado sob demanda.
 
 ## Proteções temporárias e próximos marcos
@@ -140,8 +163,10 @@ podem restringir execuções grandes.
 A rede de transporte e Dijkstra são descritos em [transport-network.md](transport-network.md).
 As proteções adicionais de reservas e coordenadas também são temporárias. Comandos
 de transporte validam e alteram registros serialmente; consultas imutáveis podem usar
-vários workspaces em paralelo. A fase de movimento dos veículos permanece inalterada.
+vários workspaces em paralelo. A fase de movimento agora distingue veículos sintéticos sem plano e execução de
+RoutePlans imutáveis. Detalhes em [vehicle-routing.md](vehicle-routing.md).
 
-Antes de commuting/employment/trip demand, recomenda-se um marco intermediário
-para veículos seguindo rotas, com progresso, chegada e reação a edições da rede.
-Demandas sociais e econômicas não devem ser antecipadas sem esse ciclo básico.
+O ciclo de execução requerido para commuting/employment/trip demand está implementado.
+O Marco 004 pode consumir chegadas e NeedsRoute, mas deverá definir demanda, frequência
+de decisões, replanejamento explícito e cleanup de planos. Não adicionar trabalho de
+pathfinding por agente/tick nem antecipar trânsito. O próximo marco não foi iniciado.

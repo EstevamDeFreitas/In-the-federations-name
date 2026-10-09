@@ -1,6 +1,7 @@
 use crate::transport::{
     TransportEdgeId, TransportMode, TransportNodeId, TransportPosition, network::TransportNetwork,
 };
+use crate::{Route, RoutePlanId, route_plans::RoutePlans};
 use crate::{VehicleId, entities::Vehicles, metrics::StableChecksum, terrain::Terrain};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -11,8 +12,20 @@ impl CommandSequence {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimulationCommand {
+    StoreRoutePlan {
+        route_plan_id: RoutePlanId,
+        route: Route,
+    },
+    AssignVehicleRoute {
+        vehicle_id: VehicleId,
+        route_plan_id: RoutePlanId,
+    },
+    SetVehicleNetworkSpeed {
+        vehicle_id: VehicleId,
+        speed_units_per_ms: u64,
+    },
     CreateTransportNode {
         node_id: TransportNodeId,
         position: TransportPosition,
@@ -51,7 +64,7 @@ pub enum SimulationCommand {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandEnvelope {
     pub sequence: CommandSequence,
     pub command: SimulationCommand,
@@ -59,6 +72,22 @@ pub struct CommandEnvelope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CommandError {
+    #[error("route plan does not exist or is not reserved: {0:?}")]
+    InvalidRoutePlan(RoutePlanId),
+    #[error("route plan ID already used: {0:?}")]
+    RoutePlanIdUsed(RoutePlanId),
+    #[error("route plan ID exhausted")]
+    RoutePlanIdOverflow,
+    #[error("route plan exceeds a temporary safety guard")]
+    RoutePlanSafetyGuard,
+    #[error("route sequence, mode or total cost is invalid")]
+    InvalidRoute,
+    #[error("vehicle is on an edge or its current node does not match the route origin")]
+    InvalidRouteAssignment,
+    #[error("network speed exceeds the temporary safety guard")]
+    InvalidNetworkSpeed,
+    #[error("physical edge length exceeds the integer safety guard")]
+    InvalidTransportLength,
     #[error("transport node is not reserved or not alive: {0:?}")]
     InvalidTransportNode(TransportNodeId),
     #[error("transport edge is not reserved or not alive: {0:?}")]
@@ -141,6 +170,7 @@ impl CommandQueue {
         terrain: &mut Terrain,
         vehicles: &mut Vehicles,
         network: &mut TransportNetwork,
+        plans: &mut RoutePlans,
     ) {
         self.results.clear();
         for envelope in self.pending.drain(..) {
@@ -151,6 +181,18 @@ impl CommandQueue {
                 SimulationCommand::SetVehicleVelocity { vehicle_id, vx, vy } => {
                     vehicles.set_velocity(vehicle_id, vx, vy)
                 }
+                SimulationCommand::StoreRoutePlan {
+                    route_plan_id,
+                    route,
+                } => plans.store(route_plan_id, route, network),
+                SimulationCommand::AssignVehicleRoute {
+                    vehicle_id,
+                    route_plan_id,
+                } => vehicles.assign_route(vehicle_id, route_plan_id, plans, network),
+                SimulationCommand::SetVehicleNetworkSpeed {
+                    vehicle_id,
+                    speed_units_per_ms,
+                } => vehicles.set_network_speed(vehicle_id, speed_units_per_ms),
                 command => network.apply(command),
             };
             self.results.push(CommandResult {
@@ -164,11 +206,11 @@ impl CommandQueue {
         hash.u64(self.pending.len() as u64);
         for envelope in &self.pending {
             hash.u64(envelope.sequence.0);
-            match envelope.command {
+            match &envelope.command {
                 SimulationCommand::SetTerrainVertexHeight { x, y, height } => {
                     hash.bytes(&[0]);
-                    hash.u64(u64::from(x));
-                    hash.u64(u64::from(y));
+                    hash.u64(u64::from(*x));
+                    hash.u64(u64::from(*y));
                     hash.bytes(&height.to_le_bytes());
                 }
                 SimulationCommand::SetVehicleVelocity { vehicle_id, vx, vy } => {
@@ -197,8 +239,8 @@ impl CommandQueue {
                     hash.u64(from.0);
                     hash.u64(to.0);
                     hash.bytes(&[mode.tag()]);
-                    hash.u64(base_cost);
-                    hash.bytes(&[u8::from(enabled)]);
+                    hash.u64(*base_cost);
+                    hash.bytes(&[u8::from(*enabled)]);
                 }
                 SimulationCommand::RemoveTransportNode { node_id } => {
                     hash.bytes(&[4]);
@@ -211,12 +253,44 @@ impl CommandQueue {
                 SimulationCommand::SetTransportEdgeEnabled { edge_id, enabled } => {
                     hash.bytes(&[6]);
                     hash.u64(edge_id.0);
-                    hash.bytes(&[u8::from(enabled)]);
+                    hash.bytes(&[u8::from(*enabled)]);
                 }
                 SimulationCommand::SetTransportEdgeCost { edge_id, base_cost } => {
                     hash.bytes(&[7]);
                     hash.u64(edge_id.0);
-                    hash.u64(base_cost);
+                    hash.u64(*base_cost);
+                }
+                SimulationCommand::StoreRoutePlan {
+                    route_plan_id,
+                    route,
+                } => {
+                    hash.bytes(&[8]);
+                    hash.u64(route_plan_id.0);
+                    hash.u64(route.origin.0);
+                    hash.u64(route.destination.0);
+                    hash.bytes(&[route.mode.tag()]);
+                    hash.u64(route.network_revision);
+                    hash.bytes(&route.total_cost.to_le_bytes());
+                    hash.u64(route.edges.len() as u64);
+                    for edge in &route.edges {
+                        hash.u64(edge.0);
+                    }
+                }
+                SimulationCommand::AssignVehicleRoute {
+                    vehicle_id,
+                    route_plan_id,
+                } => {
+                    hash.bytes(&[9]);
+                    hash.u64(vehicle_id.0);
+                    hash.u64(route_plan_id.0);
+                }
+                SimulationCommand::SetVehicleNetworkSpeed {
+                    vehicle_id,
+                    speed_units_per_ms,
+                } => {
+                    hash.bytes(&[10]);
+                    hash.u64(vehicle_id.0);
+                    hash.u64(*speed_units_per_ms);
                 }
             }
         }
@@ -237,7 +311,7 @@ mod tests {
             y: 0,
             height: 1,
         };
-        assert_eq!(queue.submit(command).unwrap().value(), u64::MAX - 1);
+        assert_eq!(queue.submit(command.clone()).unwrap().value(), u64::MAX - 1);
         assert_eq!(queue.submit(command), Err(CommandError::SequenceOverflow));
         assert_eq!(queue.pending.len(), 1);
         assert_eq!(queue.next, u64::MAX);

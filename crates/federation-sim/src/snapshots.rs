@@ -1,4 +1,8 @@
 use crate::transport::{TransportSnapshot, TransportSnapshotRequest};
+use crate::{
+    RoutePlan, RoutePlanId, RoutePlanSelection, TransportEdgeId, TransportNodeId,
+    VehicleMovementState,
+};
 use crate::{Simulation, SimulationError, VehicleId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8,6 +12,14 @@ pub struct VehicleSnapshot {
     pub y: i64,
     pub vx: i64,
     pub vy: i64,
+    pub z: i64,
+    pub movement_state: VehicleMovementState,
+    pub route_plan_id: Option<RoutePlanId>,
+    pub route_edge_index: usize,
+    pub current_edge: Option<TransportEdgeId>,
+    pub edge_progress: u64,
+    pub current_node: Option<TransportNodeId>,
+    pub speed_units_per_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,6 +56,7 @@ pub struct SnapshotRequest<'a> {
     pub vehicles: VehicleSelection<'a>,
     pub terrain_chunks: &'a [ChunkRevisionQuery],
     pub transport: Option<TransportSnapshotRequest>,
+    pub route_plans: RoutePlanSelection<'a>,
 }
 
 /// Owned copy of a tick. Editing this value cannot change authoritative state.
@@ -52,6 +65,7 @@ pub struct SnapshotRequest<'a> {
 pub struct SimulationSnapshot {
     pub region: RegionSnapshotMetadata,
     pub transport: Option<TransportSnapshot>,
+    pub route_plans: Vec<RoutePlan>,
     pub tick: u64,
     pub vehicles: Vec<VehicleSnapshot>,
     pub terrain_chunks: Vec<TerrainChunkSnapshot>,
@@ -62,6 +76,28 @@ impl Simulation {
         &self,
         request: SnapshotRequest<'_>,
     ) -> Result<SimulationSnapshot, SimulationError> {
+        let mut route_plans = Vec::new();
+        if let RoutePlanSelection::Ids(ids) = request.route_plans {
+            route_plans.try_reserve_exact(ids.len())?;
+            for &id in ids {
+                let plan = self
+                    .route_plans
+                    .get(id)
+                    .ok_or(SimulationError::InvalidRoutePlan(id))?;
+                let mut edges = Vec::new();
+                edges.try_reserve_exact(plan.edges.len())?;
+                edges.extend_from_slice(&plan.edges);
+                route_plans.push(RoutePlan {
+                    id: plan.id,
+                    origin: plan.origin,
+                    destination: plan.destination,
+                    mode: plan.mode,
+                    network_revision_when_created: plan.network_revision_when_created,
+                    total_routing_cost: plan.total_routing_cost,
+                    edges,
+                });
+            }
+        }
         let mut vehicles = Vec::new();
         match request.vehicles {
             VehicleSelection::None => {}
@@ -113,6 +149,7 @@ impl Simulation {
         }
         Ok(SimulationSnapshot {
             tick: self.tick_count(),
+            route_plans,
             region: RegionSnapshotMetadata {
                 width: terrain.width(),
                 height: terrain.height(),

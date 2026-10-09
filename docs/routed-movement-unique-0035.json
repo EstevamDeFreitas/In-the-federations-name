@@ -1,0 +1,234 @@
+{
+  "environment": {
+    "os": "windows",
+    "architecture": "x86_64",
+    "logical_cpus": 12,
+    "build_mode": "release"
+  },
+  "width": 128,
+  "height": 128,
+  "vehicles": 100000,
+  "route_plans": 100000,
+  "route_templates": 1000,
+  "unique_plan_per_vehicle": true,
+  "average_edges_per_route": 85.922,
+  "speed_units_per_ms": 4,
+  "tick_ms": 20,
+  "seed": 42,
+  "warmup_ticks": 20,
+  "measured_ticks": 200,
+  "runs": 3,
+  "invalidate_at": null,
+  "invalidated_edge_count": 0,
+  "invalidation_action": "Disable",
+  "checksum_algorithm": "FNV-1a-64 / federation-state-v4",
+  "checksums_match": true,
+  "execution_orders": [
+    [
+      12,
+      8,
+      1,
+      4,
+      16,
+      2
+    ],
+    [
+      4,
+      8,
+      2,
+      12,
+      16,
+      1
+    ],
+    [
+      8,
+      1,
+      12,
+      4,
+      2,
+      16
+    ]
+  ],
+  "results": [
+    {
+      "threads": 1,
+      "oversubscribed": false,
+      "mean_tick_ms": 19.282908333333324,
+      "p50_ms": 18.75585,
+      "p95_ms": 22.0034,
+      "p99_ms": 24.965700000000002,
+      "speedup": 1.000000000000001,
+      "vehicles_updated_per_second": 5136180.615908132,
+      "edge_transitions_per_second": 411167.2297012598,
+      "arrivals_per_second": 777.8909561100962,
+      "measured_routed_updates": 59424300,
+      "edge_transitions": 4757100,
+      "arrivals": 9000,
+      "vehicles_needing_route": 0,
+      "safety_guard_failures": 0,
+      "checksum": "fe6ca06509a221a8",
+      "memory": {
+        "vehicle_base_arrays_bytes": 4000000,
+        "movement_arrays_bytes": 8100000,
+        "event_buffers_bytes": 3300000,
+        "route_plan_records_bytes": 10485760,
+        "route_plan_edges_bytes": 68737600
+      },
+      "run_mean_tick_ms": [
+        19.021371499999997,
+        19.684290999999984,
+        19.1430625
+      ]
+    },
+    {
+      "threads": 2,
+      "oversubscribed": false,
+      "mean_tick_ms": 9.910681499999988,
+      "p50_ms": 9.627099999999999,
+      "p95_ms": 11.5407,
+      "p99_ms": 14.2522,
+      "speedup": 1.9456692593070786,
+      "vehicles_updated_per_second": 9993308.734621339,
+      "edge_transitions_per_second": 799995.4392641927,
+      "arrivals_per_second": 1513.5185203964043,
+      "measured_routed_updates": 59424300,
+      "edge_transitions": 4757100,
+      "arrivals": 9000,
+      "vehicles_needing_route": 0,
+      "safety_guard_failures": 0,
+      "checksum": "fe6ca06509a221a8",
+      "memory": {
+        "vehicle_base_arrays_bytes": 4000000,
+        "movement_arrays_bytes": 8100000,
+        "event_buffers_bytes": 3300000,
+        "route_plan_records_bytes": 10485760,
+        "route_plan_edges_bytes": 68737600
+      },
+      "run_mean_tick_ms": [
+        10.116999500000002,
+        9.652898999999998,
+        9.962146000000004
+      ]
+    },
+    {
+      "threads": 4,
+      "oversubscribed": false,
+      "mean_tick_ms": 5.122324000000001,
+      "p50_ms": 5.0392,
+      "p95_ms": 5.8793999999999995,
+      "p99_ms": 6.1846000000000005,
+      "speedup": 3.764484310897425,
+      "vehicles_updated_per_second": 19335071.346521612,
+      "edge_transitions_per_second": 1547832.5853655485,
+      "arrivals_per_second": 2928.358299865451,
+      "measured_routed_updates": 59424300,
+      "edge_transitions": 4757100,
+      "arrivals": 9000,
+      "vehicles_needing_route": 0,
+      "safety_guard_failures": 0,
+      "checksum": "fe6ca06509a221a8",
+      "memory": {
+        "vehicle_base_arrays_bytes": 4000000,
+        "movement_arrays_bytes": 8100000,
+        "event_buffers_bytes": 3300000,
+        "route_plan_records_bytes": 10485760,
+        "route_plan_edges_bytes": 68737600
+      },
+      "run_mean_tick_ms": [
+        5.1335235,
+        5.093984000000001,
+        5.139464500000003
+      ]
+    },
+    {
+      "threads": 8,
+      "oversubscribed": false,
+      "mean_tick_ms": 3.4189441666666665,
+      "p50_ms": 3.3109999999999995,
+      "p95_ms": 4.0369,
+      "p99_ms": 5.8494,
+      "speedup": 5.640018494988588,
+      "vehicles_updated_per_second": 28968153.66732371,
+      "edge_transitions_per_second": 2318990.7800483243,
+      "arrivals_per_second": 4387.3193795452935,
+      "measured_routed_updates": 59424300,
+      "edge_transitions": 4757100,
+      "arrivals": 9000,
+      "vehicles_needing_route": 0,
+      "safety_guard_failures": 0,
+      "checksum": "fe6ca06509a221a8",
+      "memory": {
+        "vehicle_base_arrays_bytes": 4000000,
+        "movement_arrays_bytes": 8100000,
+        "event_buffers_bytes": 3300000,
+        "route_plan_records_bytes": 10485760,
+        "route_plan_edges_bytes": 68737600
+      },
+      "run_mean_tick_ms": [
+        3.5103244999999976,
+        3.199253999999999,
+        3.5472539999999975
+      ]
+    },
+    {
+      "threads": 12,
+      "oversubscribed": false,
+      "mean_tick_ms": 2.8023884999999997,
+      "p50_ms": 2.68805,
+      "p95_ms": 3.6892,
+      "p99_ms": 4.054399999999999,
+      "speedup": 6.880883336958223,
+      "vehicles_updated_per_second": 35341459.61561005,
+      "edge_transitions_per_second": 2829193.7395546697,
+      "arrivals_per_second": 5352.576917868455,
+      "measured_routed_updates": 59424300,
+      "edge_transitions": 4757100,
+      "arrivals": 9000,
+      "vehicles_needing_route": 0,
+      "safety_guard_failures": 0,
+      "checksum": "fe6ca06509a221a8",
+      "memory": {
+        "vehicle_base_arrays_bytes": 4000000,
+        "movement_arrays_bytes": 8100000,
+        "event_buffers_bytes": 3300000,
+        "route_plan_records_bytes": 10485760,
+        "route_plan_edges_bytes": 68737600
+      },
+      "run_mean_tick_ms": [
+        2.8163145000000003,
+        2.706992499999999,
+        2.8838585
+      ]
+    },
+    {
+      "threads": 16,
+      "oversubscribed": true,
+      "mean_tick_ms": 2.916734833333335,
+      "p50_ms": 2.8152500000000003,
+      "p95_ms": 3.4556999999999998,
+      "p99_ms": 4.7959,
+      "speedup": 6.61112834562895,
+      "vehicles_updated_per_second": 33955949.258100174,
+      "edge_transitions_per_second": 2718279.3270717254,
+      "arrivals_per_second": 5142.736949747857,
+      "measured_routed_updates": 59424300,
+      "edge_transitions": 4757100,
+      "arrivals": 9000,
+      "vehicles_needing_route": 0,
+      "safety_guard_failures": 0,
+      "checksum": "fe6ca06509a221a8",
+      "memory": {
+        "vehicle_base_arrays_bytes": 4000000,
+        "movement_arrays_bytes": 8100000,
+        "event_buffers_bytes": 3300000,
+        "route_plan_records_bytes": 10485760,
+        "route_plan_edges_bytes": 68737600
+      },
+      "run_mean_tick_ms": [
+        2.9959809999999973,
+        2.893936500000001,
+        2.8602870000000027
+      ]
+    }
+  ]
+}

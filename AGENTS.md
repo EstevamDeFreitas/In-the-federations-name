@@ -62,4 +62,16 @@ No existing commit history establishes conventions. Use concise imperative subje
 - Consumers use snapshots/diagnostics/routing, not terrain or SoA storage getters.
 - Do not add route caches without benchmarks or A* without proving heuristic admissibility.
 - Keep routing benchmarks separate from movement and out of routine CI.
-- Do not connect vehicles to routes or add congestion in the logical network milestone.
+- Keep congestion out of route execution unless a dedicated milestone authorizes it.
+
+## Route execution
+
+- Do not perform pathfinding inside vehicle movement or recalculate paths every tick.
+- RoutingWorkspace belongs to routing workers, never to vehicles, citizens or trips.
+- Base cost is a routing cost, never physical distance.
+- Global network revision changes must not invalidate every route automatically.
+- Validate future route edges lazily; an entered edge may be completed after removal or disabling.
+- RoutePlans are immutable, centrally owned, and shareable by multiple vehicles.
+- Movement remains integer/fixed-point authoritative state, without entity locks.
+- Pathfinding and movement have different frequencies; replanning is driven by demand/events.
+- Do not introduce lanes, congestion, acceleration or routing optimizations without a dedicated milestone and benchmarks.

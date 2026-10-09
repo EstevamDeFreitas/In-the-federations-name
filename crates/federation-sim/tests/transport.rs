@@ -735,6 +735,7 @@ fn full_scenario_matches_across_one_two_four_and_eight_threads() {
                     include_edges: true,
                     known_revision: None,
                 }),
+                ..Default::default()
             })
             .unwrap();
         (sim.checksum(), snapshot, routes, results)

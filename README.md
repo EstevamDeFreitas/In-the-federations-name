@@ -33,13 +33,13 @@ cargo run -p federation-bench --release -- --width 512 --height 512 --vehicles 1
 
 ## Estrutura e estado atual
 
-- `crates/federation-sim`: terreno, metadados de chunks, veículos SoA, RNG, scheduler, diagnósticos, rede lógica e routing.
+- `crates/federation-sim`: terreno, metadados de chunks, veículos SoA, RNG, scheduler, diagnósticos, rede lógica, routing e execução de rotas.
 - `crates/federation-headless`: host CLI e utilitários de argumentos/relatórios compartilhados com o benchmark.
-- `crates/federation-bench`: benchmarks separados de movimentação sintética e routing de grid.
+- `crates/federation-bench`: benchmarks separados de movimentação sintética, routing de grid e execução de rotas.
 - `docs/architecture.md`: decisões, unidades provisórias e extensões futuras.
 - `.github/workflows/ci.yml`: formatação, Clippy, testes e build; sem benchmarks pesados.
 
-Existem altura editável por comandos, revisões de chunks, IDs opacos, snapshots independentes e movimento inteiro paralelo com seed reproduzível. A rede lógica Road/Rail já possui Dijkstra determinístico. Ainda não existem renderer, tráfego real, veículos seguindo rotas, cadeias produtivas, economia, interface ou persistência.
+Existem altura editável por comandos, revisões de chunks, IDs opacos, snapshots independentes e movimento inteiro paralelo com seed reproduzível. A rede lógica Road/Rail já possui Dijkstra determinístico. Veículos já executam planos compartilháveis sobre a rede. Ainda não existem renderer, interações de trânsito, cidadãos, economia, interface ou persistência.
 
 ## Comandos e snapshots
 
@@ -86,9 +86,9 @@ em alterações efetivas. `find_route` usa Dijkstra com desempate estável e um
 `RoutingWorkspace` reutilizável fornecido pelo consumidor. Snapshots selecionam
 nós/arestas explicitamente e podem omitir dados quando a revisão coincide.
 
-O storage de terreno e veículos deixou de ser API pública. Snapshots incluem
-`RegionSnapshotMetadata`, e o checksum v3 representa também reservas, tombstones,
-rede e comandos pendentes, excluindo dirty e scratch de routing.
+O storage de terreno e veículos permanece interno. Snapshots incluem
+`RegionSnapshotMetadata`, e o checksum v4 representa também reservas, tombstones,
+rede, planos, execução dos veículos e comandos pendentes, excluindo dirty e scratch.
 
 API completa, regras e exemplo de criação de nós/arestas em
 [docs/transport-network.md](docs/transport-network.md).
@@ -101,3 +101,39 @@ cargo run -p federation-bench --bin federation-route-bench --release --locked --
 `--width 256 --height 256`. Resultados reais estão em
 [docs/benchmarks.md](docs/benchmarks.md). O benchmark de movimento continua como
 binário default do pacote. Este marco permanece lógico e headless.
+
+## Marco 003.5: execução de rotas
+
+```text
+Simulation
+├── Terrain
+├── Vehicles (SoA)
+├── Transport Network
+├── Routing → Route
+└── Route Execution → RoutePlan → Vehicle → arrival / NeedsRoute
+```
+
+Routing calcula; `submit_store_route_plan` armazena por comando; Movement executa
+planos imutáveis que vários veículos compartilham. Não há Dijkstra a cada tick nem
+workspace por agente: RoutingWorkspace count ≈ routing worker count. O comprimento
+Manhattan X/Y/Z é separado do custo lógico. A revisão global não invalida todas as
+rotas: o veículo valida arestas futuras e pode concluir a aresta em que já entrou.
+Arrived e NeedsRoute ficam estacionários até um novo comando aplicável.
+
+Veículos sem plano mantêm temporariamente o movimento sintético do benchmark original.
+Atribuição a um veículo fora da rede estabelece sua posição no nó de origem; depois,
+reassignment exige esse nó lógico e ausência de aresta em andamento. Velocidade de
+rede é escalar, independente de VX/VY. Não há rerouting automático ou renderer.
+
+```sh
+cargo run -p federation-bench --bin federation-routed-movement-bench --release --locked -- --width 128 --height 128 --vehicles 100000 --plans 1000 --ticks 200 --runs 3 --threads 1,2,4,8,12,16 --speed 4 --output-json target/routed-results.json
+```
+
+`--unique-plan-per-vehicle` compara cópias individuais dos mesmos templates de rota.
+`--invalidate-at 5 --invalidate-count 8 --invalidation-action disable` habilita cenário
+secundário; `remove` também é aceito. Rotas são preparadas antes da medição. Workloads
+sintético, routing e routed movement têm binários e relatórios separados.
+
+API, estados, eventos e escolhas de geometria em
+[docs/vehicle-routing.md](docs/vehicle-routing.md). Números reais e estimativas de memória
+em [docs/benchmarks.md](docs/benchmarks.md). O Marco 004 ainda não foi iniciado.
