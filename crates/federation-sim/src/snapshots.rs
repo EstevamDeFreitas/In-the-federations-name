@@ -1,3 +1,4 @@
+use crate::transport::{TransportSnapshot, TransportSnapshotRequest};
 use crate::{Simulation, SimulationError, VehicleId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,12 +43,15 @@ pub enum VehicleSelection<'a> {
 pub struct SnapshotRequest<'a> {
     pub vehicles: VehicleSelection<'a>,
     pub terrain_chunks: &'a [ChunkRevisionQuery],
+    pub transport: Option<TransportSnapshotRequest>,
 }
 
 /// Owned copy of a tick. Editing this value cannot change authoritative state.
 /// Snapshot representation is independent of simulation storage representation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimulationSnapshot {
+    pub region: RegionSnapshotMetadata,
+    pub transport: Option<TransportSnapshot>,
     pub tick: u64,
     pub vehicles: Vec<VehicleSnapshot>,
     pub terrain_chunks: Vec<TerrainChunkSnapshot>,
@@ -109,8 +113,24 @@ impl Simulation {
         }
         Ok(SimulationSnapshot {
             tick: self.tick_count(),
+            region: RegionSnapshotMetadata {
+                width: terrain.width(),
+                height: terrain.height(),
+                chunk_size: terrain.chunk_size(),
+            },
+            transport: request
+                .transport
+                .map(|r| self.transport.snapshot(r))
+                .transpose()?,
             vehicles,
             terrain_chunks,
         })
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegionSnapshotMetadata {
+    pub width: u32,
+    pub height: u32,
+    pub chunk_size: u32,
 }

@@ -1,3 +1,6 @@
+use crate::transport::{
+    TransportEdgeId, TransportMode, TransportNodeId, TransportPosition, network::TransportNetwork,
+};
 use crate::{VehicleId, entities::Vehicles, metrics::StableChecksum, terrain::Terrain};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -10,6 +13,32 @@ impl CommandSequence {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SimulationCommand {
+    CreateTransportNode {
+        node_id: TransportNodeId,
+        position: TransportPosition,
+    },
+    CreateTransportEdge {
+        edge_id: TransportEdgeId,
+        from: TransportNodeId,
+        to: TransportNodeId,
+        mode: TransportMode,
+        base_cost: u64,
+        enabled: bool,
+    },
+    RemoveTransportNode {
+        node_id: TransportNodeId,
+    },
+    RemoveTransportEdge {
+        edge_id: TransportEdgeId,
+    },
+    SetTransportEdgeEnabled {
+        edge_id: TransportEdgeId,
+        enabled: bool,
+    },
+    SetTransportEdgeCost {
+        edge_id: TransportEdgeId,
+        base_cost: u64,
+    },
     SetTerrainVertexHeight {
         x: u32,
         y: u32,
@@ -30,6 +59,26 @@ pub struct CommandEnvelope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum CommandError {
+    #[error("transport node is not reserved or not alive: {0:?}")]
+    InvalidTransportNode(TransportNodeId),
+    #[error("transport edge is not reserved or not alive: {0:?}")]
+    InvalidTransportEdge(TransportEdgeId),
+    #[error("transport node identity already used: {0:?}")]
+    TransportNodeIdUsed(TransportNodeId),
+    #[error("transport edge identity already used: {0:?}")]
+    TransportEdgeIdUsed(TransportEdgeId),
+    #[error("node has live incident edges: {0:?}")]
+    TransportNodeInUse(TransportNodeId),
+    #[error("transport position exceeds the temporary safety guard")]
+    InvalidTransportPosition,
+    #[error("transport edge cost must be positive")]
+    InvalidTransportCost,
+    #[error("self loops are not supported in this milestone")]
+    TransportSelfLoop,
+    #[error("transport ID counter exhausted")]
+    TransportIdOverflow,
+    #[error("transport reservation exceeds a temporary safety guard")]
+    TransportSafetyGuard,
     #[error("terrain vertex ({x}, {y}) is outside the map")]
     InvalidVertex { x: u32, y: u32 },
     #[error("vehicle identity does not exist: {0:?}")]
@@ -87,7 +136,12 @@ impl CommandQueue {
     pub fn results(&self) -> &[CommandResult] {
         &self.results
     }
-    pub fn apply(&mut self, terrain: &mut Terrain, vehicles: &mut Vehicles) {
+    pub fn apply(
+        &mut self,
+        terrain: &mut Terrain,
+        vehicles: &mut Vehicles,
+        network: &mut TransportNetwork,
+    ) {
         self.results.clear();
         for envelope in self.pending.drain(..) {
             let result = match envelope.command {
@@ -97,6 +151,7 @@ impl CommandQueue {
                 SimulationCommand::SetVehicleVelocity { vehicle_id, vx, vy } => {
                     vehicles.set_velocity(vehicle_id, vx, vy)
                 }
+                command => network.apply(command),
             };
             self.results.push(CommandResult {
                 sequence: envelope.sequence,
@@ -121,6 +176,47 @@ impl CommandQueue {
                     hash.u64(vehicle_id.0);
                     hash.bytes(&vx.to_le_bytes());
                     hash.bytes(&vy.to_le_bytes());
+                }
+                SimulationCommand::CreateTransportNode { node_id, position } => {
+                    hash.bytes(&[2]);
+                    hash.u64(node_id.0);
+                    for v in [position.x, position.y, position.z] {
+                        hash.bytes(&v.to_le_bytes());
+                    }
+                }
+                SimulationCommand::CreateTransportEdge {
+                    edge_id,
+                    from,
+                    to,
+                    mode,
+                    base_cost,
+                    enabled,
+                } => {
+                    hash.bytes(&[3]);
+                    hash.u64(edge_id.0);
+                    hash.u64(from.0);
+                    hash.u64(to.0);
+                    hash.bytes(&[mode.tag()]);
+                    hash.u64(base_cost);
+                    hash.bytes(&[u8::from(enabled)]);
+                }
+                SimulationCommand::RemoveTransportNode { node_id } => {
+                    hash.bytes(&[4]);
+                    hash.u64(node_id.0);
+                }
+                SimulationCommand::RemoveTransportEdge { edge_id } => {
+                    hash.bytes(&[5]);
+                    hash.u64(edge_id.0);
+                }
+                SimulationCommand::SetTransportEdgeEnabled { edge_id, enabled } => {
+                    hash.bytes(&[6]);
+                    hash.u64(edge_id.0);
+                    hash.bytes(&[u8::from(enabled)]);
+                }
+                SimulationCommand::SetTransportEdgeCost { edge_id, base_cost } => {
+                    hash.bytes(&[7]);
+                    hash.u64(edge_id.0);
+                    hash.u64(base_cost);
                 }
             }
         }

@@ -4,19 +4,21 @@
 pub mod chunk;
 pub mod commands;
 pub mod config;
-pub mod entities;
+mod entities;
 pub mod ids;
 pub mod metrics;
 pub mod rng;
 pub mod scheduler;
 pub mod simulation;
 pub mod snapshots;
-pub mod terrain;
+mod terrain;
+pub mod transport;
 
 pub use commands::{
     CommandEnvelope, CommandError, CommandResult, CommandSequence, SimulationCommand,
 };
 pub use config::SimulationConfig;
+pub use entities::POSITION_UNITS_PER_TILE;
 pub use ids::VehicleId;
 pub use simulation::Simulation;
 pub use snapshots::{
@@ -46,3 +48,10 @@ pub(crate) fn filled_vec<T: Clone>(len: usize, value: T) -> Result<Vec<T>, Simul
     values.resize(len, value);
     Ok(values)
 }
+
+pub use snapshots::RegionSnapshotMetadata;
+pub use transport::{
+    Route, RouteDiagnostics, RouteError, RouteRequest, RoutingWorkspace, TransportEdgeId,
+    TransportEdgeSnapshot, TransportMode, TransportNodeId, TransportNodeSnapshot,
+    TransportPosition, TransportSnapshot, TransportSnapshotRequest,
+};

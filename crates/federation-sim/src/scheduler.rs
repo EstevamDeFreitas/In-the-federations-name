@@ -1,3 +1,4 @@
+use crate::transport::network::TransportNetwork;
 use crate::{SimulationError, config::SimulationConfig, entities::Vehicles};
 use crate::{commands::CommandQueue, terrain::Terrain};
 
@@ -29,13 +30,14 @@ impl Scheduler {
         vehicles: &mut Vehicles,
         terrain: &mut Terrain,
         commands: &mut CommandQueue,
+        network: &mut TransportNetwork,
         config: &SimulationConfig,
         ticks: &mut u64,
     ) -> Result<(), SimulationError> {
         let next_tick = ticks.checked_add(1).ok_or(SimulationError::TickOverflow)?;
         for phase in TICK_PHASES {
             match phase {
-                Phase::ApplyCommands => commands.apply(terrain, vehicles),
+                Phase::ApplyCommands => commands.apply(terrain, vehicles, network),
                 Phase::Movement => self.pool.install(|| {
                     vehicles.move_parallel(config.width, config.height, config.tick_ms)
                 }),
@@ -63,12 +65,14 @@ mod tests {
         let mut ticks = 0;
         let mut terrain = Terrain::new(config.width, config.height, config.chunk_size).unwrap();
         let mut commands = CommandQueue::default();
+        let mut network = TransportNetwork::default();
         for _ in 0..4 {
             scheduler
                 .tick(
                     &mut vehicles,
                     &mut terrain,
                     &mut commands,
+                    &mut network,
                     &config,
                     &mut ticks,
                 )

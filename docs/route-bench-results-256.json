@@ -1,0 +1,166 @@
+{
+  "environment": {
+    "os": "windows",
+    "architecture": "x86_64",
+    "logical_cpus": 12,
+    "build_mode": "release"
+  },
+  "width": 256,
+  "height": 256,
+  "nodes": 65536,
+  "edges": 261120,
+  "queries": 256,
+  "runs": 3,
+  "warmup_queries_per_workspace": 16,
+  "seed": 42,
+  "network_checksum": "1a1bca442d2ab4c6",
+  "checksums_match": true,
+  "execution_orders": [
+    [
+      12,
+      8,
+      1,
+      4,
+      16,
+      2
+    ],
+    [
+      4,
+      8,
+      2,
+      12,
+      16,
+      1
+    ],
+    [
+      8,
+      1,
+      12,
+      4,
+      2,
+      16
+    ]
+  ],
+  "results": [
+    {
+      "threads": 1,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 5.211168619791669,
+      "median_ms": 4.63305,
+      "p95_ms": 10.9009,
+      "p99_ms": 12.7088,
+      "routes_per_second": 191.86505650913074,
+      "speedup": 1.0,
+      "batch_seconds": [
+        1.3391275999999999,
+        1.3192892999999999,
+        1.3443964
+      ],
+      "route_output_checksum": "a3fcb48860247fcc",
+      "average_visited_nodes": 30707.26953125,
+      "average_relaxed_edges": 122484.5078125,
+      "average_heap_pushes": 30934.28125
+    },
+    {
+      "threads": 2,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 5.5187769531249975,
+      "median_ms": 4.78695,
+      "p95_ms": 12.0897,
+      "p99_ms": 14.2446,
+      "routes_per_second": 328.3841115794481,
+      "speedup": 1.7115368350766909,
+      "batch_seconds": [
+        0.7929121,
+        0.6855646,
+        0.8602479
+      ],
+      "route_output_checksum": "a3fcb48860247fcc",
+      "average_visited_nodes": 30707.26953125,
+      "average_relaxed_edges": 122484.5078125,
+      "average_heap_pushes": 30934.28125
+    },
+    {
+      "threads": 4,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 6.759865364583332,
+      "median_ms": 5.8616,
+      "p95_ms": 14.708499999999999,
+      "p99_ms": 18.2594,
+      "routes_per_second": 529.4310587697429,
+      "speedup": 2.759392817026834,
+      "batch_seconds": [
+        0.4991705,
+        0.470396,
+        0.4810473
+      ],
+      "route_output_checksum": "a3fcb48860247fcc",
+      "average_visited_nodes": 30707.26953125,
+      "average_relaxed_edges": 122484.5078125,
+      "average_heap_pushes": 30934.28125
+    },
+    {
+      "threads": 8,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 9.013266145833326,
+      "median_ms": 7.93655,
+      "p95_ms": 20.395,
+      "p99_ms": 23.6793,
+      "routes_per_second": 770.100835078093,
+      "speedup": 4.013762845041272,
+      "batch_seconds": [
+        0.3175292,
+        0.3378362,
+        0.3419066
+      ],
+      "route_output_checksum": "a3fcb48860247fcc",
+      "average_visited_nodes": 30707.26953125,
+      "average_relaxed_edges": 122484.5078125,
+      "average_heap_pushes": 30934.28125
+    },
+    {
+      "threads": 12,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 11.203816406249995,
+      "median_ms": 9.7162,
+      "p95_ms": 25.1873,
+      "p99_ms": 31.452599999999997,
+      "routes_per_second": 895.3918796817161,
+      "speedup": 4.666779329039027,
+      "batch_seconds": [
+        0.2898005,
+        0.2839159,
+        0.2840086
+      ],
+      "route_output_checksum": "a3fcb48860247fcc",
+      "average_visited_nodes": 30707.26953125,
+      "average_relaxed_edges": 122484.5078125,
+      "average_heap_pushes": 30934.28125
+    },
+    {
+      "threads": 16,
+      "oversubscribed": true,
+      "runs": 3,
+      "mean_ms_per_route": 13.178704687500002,
+      "median_ms": 10.967899999999998,
+      "p95_ms": 32.0789,
+      "p99_ms": 44.6083,
+      "routes_per_second": 981.2223679859848,
+      "speedup": 5.114127532333065,
+      "batch_seconds": [
+        0.2537102,
+        0.2755977,
+        0.2533893
+      ],
+      "route_output_checksum": "a3fcb48860247fcc",
+      "average_visited_nodes": 30707.26953125,
+      "average_relaxed_edges": 122484.5078125,
+      "average_heap_pushes": 30934.28125
+    }
+  ]
+}

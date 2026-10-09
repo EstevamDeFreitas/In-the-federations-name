@@ -1,3 +1,7 @@
+use crate::transport::{
+    Route, RouteError, RouteRequest, RoutingWorkspace, TransportEdgeId, TransportNodeId,
+    network::TransportNetwork,
+};
 use crate::{
     SimulationError,
     commands::{CommandError, CommandQueue, CommandResult, CommandSequence, SimulationCommand},
@@ -15,6 +19,7 @@ pub struct Simulation {
     scheduler: Scheduler,
     ticks: u64,
     commands: CommandQueue,
+    pub(crate) transport: TransportNetwork,
 }
 
 impl Simulation {
@@ -30,6 +35,7 @@ impl Simulation {
             scheduler,
             ticks: 0,
             commands: CommandQueue::default(),
+            transport: TransportNetwork::default(),
         })
     }
     pub fn tick(&mut self) -> Result<(), SimulationError> {
@@ -37,6 +43,7 @@ impl Simulation {
             &mut self.vehicles,
             &mut self.terrain,
             &mut self.commands,
+            &mut self.transport,
             &self.config,
             &mut self.ticks,
         )
@@ -47,10 +54,10 @@ impl Simulation {
     pub fn config(&self) -> &SimulationConfig {
         &self.config
     }
-    pub fn terrain(&self) -> &Terrain {
+    pub(crate) fn terrain(&self) -> &Terrain {
         &self.terrain
     }
-    pub fn vehicles(&self) -> &Vehicles {
+    pub(crate) fn vehicles(&self) -> &Vehicles {
         &self.vehicles
     }
     pub fn submit_command(
@@ -64,10 +71,55 @@ impl Simulation {
         self.commands.results()
     }
 
+    /// Reserves a unique identity; does not create a live node or change revision.
+    pub fn reserve_transport_node_id(&mut self) -> Result<TransportNodeId, CommandError> {
+        self.transport.reserve_node()
+    }
+    pub fn reserve_transport_edge_id(&mut self) -> Result<TransportEdgeId, CommandError> {
+        self.transport.reserve_edge()
+    }
+    /// Allocate identity and enqueue creation in submission-call order.
+    /// An identity reserved before a submission error is deliberately not reused.
+    pub fn submit_create_transport_node(
+        &mut self,
+        position: crate::TransportPosition,
+    ) -> Result<(TransportNodeId, CommandSequence), CommandError> {
+        let node_id = self.reserve_transport_node_id()?;
+        let sequence =
+            self.submit_command(SimulationCommand::CreateTransportNode { node_id, position })?;
+        Ok((node_id, sequence))
+    }
+    pub fn submit_create_transport_edge(
+        &mut self,
+        from: TransportNodeId,
+        to: TransportNodeId,
+        mode: crate::TransportMode,
+        base_cost: u64,
+        enabled: bool,
+    ) -> Result<(TransportEdgeId, CommandSequence), CommandError> {
+        let edge_id = self.reserve_transport_edge_id()?;
+        let sequence = self.submit_command(SimulationCommand::CreateTransportEdge {
+            edge_id,
+            from,
+            to,
+            mode,
+            base_cost,
+            enabled,
+        })?;
+        Ok((edge_id, sequence))
+    }
+    pub fn find_route(
+        &self,
+        request: RouteRequest,
+        workspace: &mut RoutingWorkspace,
+    ) -> Result<Route, RouteError> {
+        self.transport.find_route(request, workspace)
+    }
     pub fn checksum(&self) -> u64 {
         let mut hash = StableChecksum::new();
-        hash.bytes(b"federation-state-v2");
+        hash.bytes(b"federation-state-v3");
         self.commands.checksum(&mut hash);
+        self.transport.checksum(&mut hash);
         for value in [
             u64::from(self.config.width),
             u64::from(self.config.height),
@@ -84,7 +136,6 @@ impl Simulation {
         }
         for chunk in self.terrain.chunks() {
             hash.u64(chunk.revision);
-            hash.bytes(&[u8::from(chunk.dirty)]);
         }
         for i in 0..self.vehicles.len() {
             hash.u64(self.vehicles.ids()[i].0);
@@ -143,7 +194,9 @@ mod tests {
             ..Default::default()
         };
         let before = sim.snapshot(request).unwrap();
+        let checksum = sim.checksum();
         sim.terrain.clear_dirty();
+        assert_eq!(sim.checksum(), checksum);
         assert!(!sim.terrain.chunks()[0].dirty);
         assert_eq!(sim.snapshot(request).unwrap(), before);
     }

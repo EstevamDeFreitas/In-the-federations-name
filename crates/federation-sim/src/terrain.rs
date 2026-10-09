@@ -55,10 +55,12 @@ impl Terrain {
     pub fn heights(&self) -> &[i32] {
         &self.heights
     }
+    #[cfg(test)]
     pub fn chunk_dimensions(&self) -> (u32, u32) {
         (self.chunks_x, self.chunks_y)
     }
 
+    #[cfg(test)]
     pub fn tile_index(&self, x: u32, y: u32) -> Result<usize, SimulationError> {
         if x >= self.width || y >= self.height {
             return Err(SimulationError::OutOfBounds { kind: "tile", x, y });
@@ -88,6 +90,7 @@ impl Terrain {
         Ok(y as usize * self.chunks_x as usize + x as usize)
     }
 
+    #[cfg(test)]
     pub fn height_at(&self, x: u32, y: u32) -> Result<i32, SimulationError> {
         Ok(self.heights[self.vertex_index(x, y)?])
     }
@@ -127,6 +130,21 @@ impl Terrain {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rectangular_map_indexing_and_bounds() {
+        let t = Terrain::new(65, 35, 32).unwrap();
+        assert_eq!(t.chunk_dimensions(), (3, 2));
+        assert_eq!(t.tile_index(64, 34).unwrap(), 65 * 35 - 1);
+        assert_eq!(t.vertex_index(65, 35).unwrap(), 66 * 36 - 1);
+        assert_eq!(t.chunk_index(2, 1).unwrap(), 5);
+        assert!(t.tile_index(65, 0).is_err());
+        assert!(t.tile_index(0, 35).is_err());
+        assert!(t.vertex_index(66, 0).is_err());
+        assert!(t.vertex_index(0, 36).is_err());
+        assert!(t.chunk_index(3, 0).is_err());
+        assert!(t.chunk_index(0, 2).is_err());
+    }
+
     use super::*;
     #[test]
     fn shared_vertices_invalidate_exactly_adjacent_chunks() {

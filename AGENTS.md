@@ -5,9 +5,10 @@
 This Rust 2024 workspace implements the headless simulation foundation for **In The Federation's Name**. Read `Instructions.md` for the milestone requirements. Always look for `.github/prompts/` and read applicable Markdown instructions before working; that directory is currently absent.
 
 - `crates/federation-sim/src/`: configuration, terrain/chunks, SoA vehicles, deterministic RNG, scheduler, simulation and metrics.
-- `crates/federation-sim/tests/`: behavioral integration tests.
+- `crates/federation-sim/src/transport/`: logical directed multigraph, IDs, Dijkstra and network snapshots.
+- `crates/federation-sim/tests/`: behavioral integration tests through public snapshots and commands.
 - `crates/federation-headless/`: executable host and shared CLI/report utilities.
-- `crates/federation-bench/`: comparative synthetic movement benchmark.
+- `crates/federation-bench/`: separate movement and `federation-route-bench` grid routing benchmarks.
 - `docs/`: architecture and measured benchmark methodology/results.
 
 ## Build, Test, and Development Commands
@@ -45,3 +46,20 @@ No existing commit history establishes conventions. Use concise imperative subje
 - Keep next sequence and pending commands represented in the deterministic checksum.
 - Configuration and velocity bounds are temporary safety guards, not game design limits.
 - Tick phases are ApplyCommands, Movement, Finalize; Diagnostics remains on demand.
+
+## Transport network and routing
+
+- Equal node positions never imply connectivity.
+- Edges are directed; bidirectional transport requires two edges.
+- Never use `(from, to)` as edge identity; parallel edges are valid.
+- Never interpret transport identity tokens as storage slots.
+- Reserve an ID immediately before submitting its creation command; IDs are not reused.
+- Network mutations must use commands, and effective routing/topology changes update revision.
+- Disabled live edges still prevent removal of incident nodes; do not cascade removal.
+- Routing uses integer costs and deterministic output, including equal-cost ties.
+- RoutingWorkspace is disposable scratch, excluded from authoritative checksum.
+- Dirty flags are operational state, excluded from the checksum.
+- Consumers use snapshots/diagnostics/routing, not terrain or SoA storage getters.
+- Do not add route caches without benchmarks or A* without proving heuristic admissibility.
+- Keep routing benchmarks separate from movement and out of routine CI.
+- Do not connect vehicles to routes or add congestion in the logical network milestone.

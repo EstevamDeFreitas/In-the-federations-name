@@ -26,14 +26,14 @@ fn all(sim: &Simulation) -> SimulationSnapshot {
 #[test]
 fn submission_is_deferred_ordered_and_results_are_per_tick() {
     let mut sim = simulation(1);
-    let before = sim.terrain().heights().to_vec();
+    let before = terrain(&sim);
     let a = sim.submit_command(height(20, 20, 4)).unwrap();
     let b = sim.submit_command(height(20, 20, 7)).unwrap();
     assert!(a < b);
-    assert_eq!(sim.terrain().heights(), before);
+    assert_eq!(terrain(&sim), before);
     assert!(sim.command_results().is_empty());
     sim.tick().unwrap();
-    assert_eq!(sim.terrain().height_at(20, 20).unwrap(), 7);
+    assert_eq!(vertex(&sim, 20, 20), 7);
     assert_eq!(
         sim.command_results(),
         [
@@ -56,7 +56,7 @@ fn submission_is_deferred_ordered_and_results_are_per_tick() {
 #[test]
 fn invalid_commands_preserve_state_and_allow_following_commands() {
     let mut sim = simulation(2);
-    let id = sim.vehicles().ids()[0];
+    let id = all(&sim).vehicles[0].id;
     let missing = VehicleId::from_raw(u64::MAX);
     sim.submit_command(height(66, 0, 3)).unwrap();
     sim.submit_command(SimulationCommand::SetVehicleVelocity {
@@ -72,7 +72,7 @@ fn invalid_commands_preserve_state_and_allow_following_commands() {
     })
     .unwrap();
     sim.submit_command(height(0, 0, i32::MIN)).unwrap();
-    let velocity = sim.vehicles().get(id).unwrap();
+    let velocity = vehicle(&sim, id);
     sim.tick().unwrap();
     let results = sim.command_results();
     assert_eq!(
@@ -85,25 +85,25 @@ fn invalid_commands_preserve_state_and_allow_following_commands() {
     );
     assert_eq!(results[2].result, Err(CommandError::InvalidVelocity));
     assert_eq!(results[3].result, Ok(()));
-    assert_eq!(sim.vehicles().get(id).unwrap().vx, velocity.vx);
-    assert_eq!(sim.vehicles().get(id).unwrap().vy, velocity.vy);
-    assert_eq!(sim.terrain().height_at(0, 0).unwrap(), i32::MIN);
+    assert_eq!(vehicle(&sim, id).vx, velocity.vx);
+    assert_eq!(vehicle(&sim, id).vy, velocity.vy);
+    assert_eq!(vertex(&sim, 0, 0), i32::MIN);
 }
 
 #[test]
 fn velocity_applies_before_movement_and_identity_is_stable() {
     let mut sim = simulation(4);
     let id = all(&sim).vehicles[12].id;
-    let before = sim.vehicles().get(id).unwrap();
+    let before = vehicle(&sim, id);
     sim.submit_command(SimulationCommand::SetVehicleVelocity {
         vehicle_id: id,
         vx: 5,
         vy: -9,
     })
     .unwrap();
-    assert_eq!(sim.vehicles().get(id).unwrap(), before);
+    assert_eq!(vehicle(&sim, id), before);
     sim.tick().unwrap();
-    let after = sim.vehicles().get(id).unwrap();
+    let after = vehicle(&sim, id);
     assert_eq!(after.id, id);
     assert_eq!((after.vx, after.vy), (5, -9));
     assert_eq!(after.x, (before.x + 100).rem_euclid(65 * 1024));
@@ -111,14 +111,14 @@ fn velocity_applies_before_movement_and_identity_is_stable() {
     for _ in 0..10 {
         sim.tick().unwrap();
     }
-    assert_eq!(sim.vehicles().get(id).unwrap().id, id);
+    assert_eq!(vehicle(&sim, id).id, id);
 }
 
 #[test]
 fn snapshots_own_selected_data_across_ticks_and_edits() {
     let mut sim = simulation(1);
     sim.tick().unwrap();
-    let id = sim.vehicles().ids()[0];
+    let id = all(&sim).vehicles[0].id;
     let ids = [id];
     let chunks = [ChunkRevisionQuery {
         x: 2,
@@ -128,11 +128,12 @@ fn snapshots_own_selected_data_across_ticks_and_edits() {
     let request = SnapshotRequest {
         vehicles: VehicleSelection::Ids(&ids),
         terrain_chunks: &chunks,
+        ..Default::default()
     };
     let old = sim.snapshot(request).unwrap();
     let saved = old.clone();
     assert_eq!(old.tick, 1);
-    assert_eq!(old.vehicles, [sim.vehicles().get(id).unwrap()]);
+    assert_eq!(old.vehicles, [vehicle(&sim, id)]);
     let chunk = &old.terrain_chunks[0];
     assert_eq!(
         (
@@ -163,8 +164,12 @@ fn snapshots_own_selected_data_across_ticks_and_edits() {
 fn revisions_support_shared_vertices_and_independent_consumers() {
     let mut sim = simulation(1);
     let queries: Vec<_> = sim
-        .terrain()
-        .chunks()
+        .snapshot(SnapshotRequest {
+            terrain_chunks: &queries(&sim),
+            ..Default::default()
+        })
+        .unwrap()
+        .terrain_chunks
         .iter()
         .map(|c| ChunkRevisionQuery {
             x: c.x,
@@ -244,7 +249,7 @@ fn pending_commands_and_sequence_progress_are_deterministic_state() {
     assert_ne!(a.checksum(), b.checksum());
     a.tick().unwrap();
     b.tick().unwrap();
-    assert_eq!(a.terrain().heights(), b.terrain().heights());
+    assert_eq!(terrain(&a), terrain(&b));
     assert_ne!(a.checksum(), b.checksum());
     b.submit_command(height(0, 0, 0)).unwrap();
     a.tick().unwrap();
@@ -259,7 +264,7 @@ fn pending_commands_and_sequence_progress_are_deterministic_state() {
 fn commands_results_and_snapshots_match_across_thread_counts() {
     let scenario = |threads| {
         let mut sim = simulation(threads);
-        let id = sim.vehicles().ids()[23];
+        let id = all(&sim).vehicles[23].id;
         let mut results = Vec::new();
         for tick in 0..20 {
             sim.submit_command(height(32, 32, tick)).unwrap();
@@ -275,8 +280,12 @@ fn commands_results_and_snapshots_match_across_thread_counts() {
             results.extend_from_slice(sim.command_results());
         }
         let chunks: Vec<_> = sim
-            .terrain()
-            .chunks()
+            .snapshot(SnapshotRequest {
+                terrain_chunks: &queries(&sim),
+                ..Default::default()
+            })
+            .unwrap()
+            .terrain_chunks
             .iter()
             .map(|c| ChunkRevisionQuery {
                 x: c.x,
@@ -289,6 +298,7 @@ fn commands_results_and_snapshots_match_across_thread_counts() {
             sim.snapshot(SnapshotRequest {
                 vehicles: VehicleSelection::All,
                 terrain_chunks: &chunks,
+                ..Default::default()
             })
             .unwrap(),
             results,
@@ -298,4 +308,49 @@ fn commands_results_and_snapshots_match_across_thread_counts() {
     for threads in [2, 4, 8] {
         assert_eq!(scenario(threads), reference);
     }
+}
+
+fn queries(sim: &Simulation) -> Vec<ChunkRevisionQuery> {
+    let region = sim.snapshot(SnapshotRequest::default()).unwrap().region;
+    (0..region.height.div_ceil(region.chunk_size))
+        .flat_map(|y| {
+            (0..region.width.div_ceil(region.chunk_size)).map(move |x| ChunkRevisionQuery {
+                x,
+                y,
+                known_revision: None,
+            })
+        })
+        .collect()
+}
+fn terrain(sim: &Simulation) -> Vec<TerrainChunkSnapshot> {
+    sim.snapshot(SnapshotRequest {
+        terrain_chunks: &queries(sim),
+        ..Default::default()
+    })
+    .unwrap()
+    .terrain_chunks
+}
+fn vehicle(sim: &Simulation, id: VehicleId) -> VehicleSnapshot {
+    sim.snapshot(SnapshotRequest {
+        vehicles: VehicleSelection::Ids(&[id]),
+        ..Default::default()
+    })
+    .unwrap()
+    .vehicles[0]
+}
+fn vertex(sim: &Simulation, x: u32, y: u32) -> i32 {
+    let region = sim.snapshot(SnapshotRequest::default()).unwrap().region;
+    let chunk = sim
+        .snapshot(SnapshotRequest {
+            terrain_chunks: &[ChunkRevisionQuery {
+                x: x.min(region.width - 1) / region.chunk_size,
+                y: y.min(region.height - 1) / region.chunk_size,
+                known_revision: None,
+            }],
+            ..Default::default()
+        })
+        .unwrap()
+        .terrain_chunks
+        .remove(0);
+    chunk.heights[((y - chunk.origin_y) * chunk.vertices_x + x - chunk.origin_x) as usize]
 }

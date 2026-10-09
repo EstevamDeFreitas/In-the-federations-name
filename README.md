@@ -33,15 +33,15 @@ cargo run -p federation-bench --release -- --width 512 --height 512 --vehicles 1
 
 ## Estrutura e estado atual
 
-- `crates/federation-sim`: terreno, metadados de chunks, veículos SoA, RNG, scheduler e diagnósticos.
+- `crates/federation-sim`: terreno, metadados de chunks, veículos SoA, RNG, scheduler, diagnósticos, rede lógica e routing.
 - `crates/federation-headless`: host CLI e utilitários de argumentos/relatórios compartilhados com o benchmark.
-- `crates/federation-bench`: medição comparativa de movimentação sintética.
+- `crates/federation-bench`: benchmarks separados de movimentação sintética e routing de grid.
 - `docs/architecture.md`: decisões, unidades provisórias e extensões futuras.
 - `.github/workflows/ci.yml`: formatação, Clippy, testes e build; sem benchmarks pesados.
 
-Existem altura editável por comandos, revisões de chunks, IDs opacos, snapshots independentes e movimento inteiro paralelo com seed reproduzível. Ainda não existem renderer, tráfego real, pathfinding, cadeias produtivas, economia, interface ou persistência.
+Existem altura editável por comandos, revisões de chunks, IDs opacos, snapshots independentes e movimento inteiro paralelo com seed reproduzível. A rede lógica Road/Rail já possui Dijkstra determinístico. Ainda não existem renderer, tráfego real, veículos seguindo rotas, cadeias produtivas, economia, interface ou persistência.
 
-## Marco 002: comandos e snapshots
+## Comandos e snapshots
 
 Mudanças autoritativas passam por `submit_command` e só ocorrem no próximo tick,
 antes do movimento. Resultados são consultados em `command_results()` e substituídos
@@ -69,6 +69,7 @@ let queries = [ChunkRevisionQuery { x: 0, y: 0, known_revision: None }];
 let snapshot = sim.snapshot(SnapshotRequest {
     vehicles: VehicleSelection::Ids(&ids),
     terrain_chunks: &queries,
+    ..Default::default()
 })?;
 ```
 
@@ -76,3 +77,27 @@ Exemplo dentro de uma função que retorna `Result<(), Box<dyn std::error::Error
 Todos os limites numéricos de configuração e velocidade são proteções temporárias
 contra overflow e consumo excessivo de recursos, sem estabelecer limites de design
 do jogo. Detalhes em [docs/architecture.md](docs/architecture.md).
+
+## Marco 003: transporte e routing
+
+Rede direcionada com múltiplas arestas, IDs estáveis sem reutilização, nós X/Y/Z,
+Road/Rail e custos inteiros. Edições usam comandos; a revisão global muda somente
+em alterações efetivas. `find_route` usa Dijkstra com desempate estável e um
+`RoutingWorkspace` reutilizável fornecido pelo consumidor. Snapshots selecionam
+nós/arestas explicitamente e podem omitir dados quando a revisão coincide.
+
+O storage de terreno e veículos deixou de ser API pública. Snapshots incluem
+`RegionSnapshotMetadata`, e o checksum v3 representa também reservas, tombstones,
+rede e comandos pendentes, excluindo dirty e scratch de routing.
+
+API completa, regras e exemplo de criação de nós/arestas em
+[docs/transport-network.md](docs/transport-network.md).
+
+```sh
+cargo run -p federation-bench --bin federation-route-bench --release --locked -- --width 128 --height 128 --queries 512 --runs 3 --threads 1,2,4,8,12,16 --seed 42 --output-json target/route-results.json
+```
+
+`--warmup` define consultas por workspace (default 16). Para o cenário maior, use
+`--width 256 --height 256`. Resultados reais estão em
+[docs/benchmarks.md](docs/benchmarks.md). O benchmark de movimento continua como
+binário default do pacote. Este marco permanece lógico e headless.

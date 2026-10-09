@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         },
         logical_time_ms: metrics.logical_time_ms.to_string(),
         dirty_chunks: metrics.dirty_chunks,
-        checksum_algorithm: "FNV-1a-64 / federation-state-v2",
+        checksum_algorithm: "FNV-1a-64 / federation-state-v3",
         checksum: format!("{:016x}", metrics.checksum),
     };
     println!("In The Federation's Name — headless");

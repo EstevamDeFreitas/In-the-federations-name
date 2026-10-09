@@ -193,7 +193,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         warmup_ticks: cli.warmup,
         measured_ticks: cli.ticks,
         total_simulated_ticks: u64::from(cli.warmup) + u64::from(cli.ticks),
-        checksum_algorithm: "FNV-1a-64 / federation-state-v2",
+        checksum_algorithm: "FNV-1a-64 / federation-state-v3",
         checksums_match,
         results,
         runs: cli.runs,

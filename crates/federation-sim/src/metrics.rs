@@ -8,7 +8,7 @@ pub struct SimulationMetrics {
     pub checksum: u64,
 }
 
-/// Versioned checksum v1: FNV-1a 64-bit over explicit little-endian fields.
+/// Checksum primitive: FNV-1a 64-bit over explicit little-endian fields.
 /// This is a reproducibility fingerprint, not a cryptographic hash.
 pub(crate) struct StableChecksum(u64);
 impl StableChecksum {

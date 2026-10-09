@@ -1,0 +1,166 @@
+{
+  "environment": {
+    "os": "windows",
+    "architecture": "x86_64",
+    "logical_cpus": 12,
+    "build_mode": "release"
+  },
+  "width": 128,
+  "height": 128,
+  "nodes": 16384,
+  "edges": 65024,
+  "queries": 512,
+  "runs": 3,
+  "warmup_queries_per_workspace": 16,
+  "seed": 42,
+  "network_checksum": "bf6def3b72675e9a",
+  "checksums_match": true,
+  "execution_orders": [
+    [
+      12,
+      8,
+      1,
+      4,
+      16,
+      2
+    ],
+    [
+      4,
+      8,
+      2,
+      12,
+      16,
+      1
+    ],
+    [
+      8,
+      1,
+      12,
+      4,
+      2,
+      16
+    ]
+  ],
+  "results": [
+    {
+      "threads": 1,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 0.8724074869791679,
+      "median_ms": 0.8558,
+      "p95_ms": 1.822,
+      "p99_ms": 2.2794999999999996,
+      "routes_per_second": 1145.721446473326,
+      "speedup": 1.0,
+      "batch_seconds": [
+        0.4614542,
+        0.454886,
+        0.4242998
+      ],
+      "route_output_checksum": "4d4b2cec4aa1d708",
+      "average_visited_nodes": 8579.529296875,
+      "average_relaxed_edges": 34124.71875,
+      "average_heap_pushes": 8695.28125
+    },
+    {
+      "threads": 2,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 0.9992253906250012,
+      "median_ms": 0.9498,
+      "p95_ms": 2.2633,
+      "p99_ms": 2.8349,
+      "routes_per_second": 1816.8563818795544,
+      "speedup": 1.5857749608092486,
+      "batch_seconds": [
+        0.3389643,
+        0.29912,
+        0.207332
+      ],
+      "route_output_checksum": "4d4b2cec4aa1d708",
+      "average_visited_nodes": 8579.529296875,
+      "average_relaxed_edges": 34124.71875,
+      "average_heap_pushes": 8695.28125
+    },
+    {
+      "threads": 4,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 1.2112614583333337,
+      "median_ms": 1.13645,
+      "p95_ms": 2.6195,
+      "p99_ms": 3.2533000000000003,
+      "routes_per_second": 2759.032958947889,
+      "speedup": 2.4081184544817043,
+      "batch_seconds": [
+        0.1869363,
+        0.188026,
+        0.1817545
+      ],
+      "route_output_checksum": "4d4b2cec4aa1d708",
+      "average_visited_nodes": 8579.529296875,
+      "average_relaxed_edges": 34124.71875,
+      "average_heap_pushes": 8695.28125
+    },
+    {
+      "threads": 8,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 1.7177330078125,
+      "median_ms": 1.6553499999999999,
+      "p95_ms": 3.505,
+      "p99_ms": 4.166300000000001,
+      "routes_per_second": 4127.6796662599,
+      "speedup": 3.602690408707469,
+      "batch_seconds": [
+        0.1337677,
+        0.116055,
+        0.1222992
+      ],
+      "route_output_checksum": "4d4b2cec4aa1d708",
+      "average_visited_nodes": 8579.529296875,
+      "average_relaxed_edges": 34124.71875,
+      "average_heap_pushes": 8695.28125
+    },
+    {
+      "threads": 12,
+      "oversubscribed": false,
+      "runs": 3,
+      "mean_ms_per_route": 1.9504169270833294,
+      "median_ms": 1.8316000000000001,
+      "p95_ms": 4.0862,
+      "p99_ms": 5.3356,
+      "routes_per_second": 5210.350959199831,
+      "speedup": 4.547659446576603,
+      "batch_seconds": [
+        0.1026557,
+        0.1084047,
+        0.0837374
+      ],
+      "route_output_checksum": "4d4b2cec4aa1d708",
+      "average_visited_nodes": 8579.529296875,
+      "average_relaxed_edges": 34124.71875,
+      "average_heap_pushes": 8695.28125
+    },
+    {
+      "threads": 16,
+      "oversubscribed": true,
+      "runs": 3,
+      "mean_ms_per_route": 2.1770417968749993,
+      "median_ms": 1.7509499999999998,
+      "p95_ms": 4.4231,
+      "p99_ms": 15.1578,
+      "routes_per_second": 5878.343547082815,
+      "speedup": 5.1306917271882195,
+      "batch_seconds": [
+        0.0863328,
+        0.0900357,
+        0.0849296
+      ],
+      "route_output_checksum": "4d4b2cec4aa1d708",
+      "average_visited_nodes": 8579.529296875,
+      "average_relaxed_edges": 34124.71875,
+      "average_heap_pushes": 8695.28125
+    }
+  ]
+}
