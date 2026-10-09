@@ -1,4 +1,6 @@
-use crate::{SimulationError, filled_vec, rng::DeterministicRng};
+use crate::{
+    CommandError, SimulationError, VehicleId, VehicleSnapshot, filled_vec, rng::DeterministicRng,
+};
 use rayon::prelude::*;
 
 pub const POSITION_UNITS_PER_TILE: i64 = 1024;
@@ -7,7 +9,7 @@ pub const POSITION_UNITS_PER_TILE: i64 = 1024;
 pub struct Vehicles {
     #[cfg(test)]
     observed_workers: std::sync::atomic::AtomicU64,
-    ids: Vec<u64>,
+    ids: Vec<VehicleId>,
     x: Vec<i64>,
     y: Vec<i64>,
     vx: Vec<i64>,
@@ -24,7 +26,7 @@ impl Vehicles {
         let mut result = Self {
             #[cfg(test)]
             observed_workers: std::sync::atomic::AtomicU64::new(0),
-            ids: filled_vec(count, 0)?,
+            ids: filled_vec(count, VehicleId(0))?,
             x: filled_vec(count, 0)?,
             y: filled_vec(count, 0)?,
             vx: filled_vec(count, 0)?,
@@ -32,7 +34,7 @@ impl Vehicles {
         };
         let mut rng = DeterministicRng::new(seed);
         for i in 0..count {
-            result.ids[i] = i as u64;
+            result.ids[i] = VehicleId(i as u64);
             result.x[i] =
                 (rng.next_u64() % (u64::from(width) * POSITION_UNITS_PER_TILE as u64)) as i64;
             result.y[i] =
@@ -54,7 +56,7 @@ impl Vehicles {
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
     }
-    pub fn ids(&self) -> &[u64] {
+    pub fn ids(&self) -> &[VehicleId] {
         &self.ids
     }
     pub fn x(&self) -> &[i64] {
@@ -68,6 +70,40 @@ impl Vehicles {
     }
     pub fn vy(&self) -> &[i64] {
         &self.vy
+    }
+
+    // Temporary direct identity-to-slot mapping, never a public contract.
+    fn slot(&self, id: VehicleId) -> Option<usize> {
+        let slot = usize::try_from(id.0).ok()?;
+        (self.ids.get(slot) == Some(&id)).then_some(slot)
+    }
+    pub fn get(&self, id: VehicleId) -> Option<VehicleSnapshot> {
+        let i = self.slot(id)?;
+        Some(VehicleSnapshot {
+            id,
+            x: self.x[i],
+            y: self.y[i],
+            vx: self.vx[i],
+            vy: self.vy[i],
+        })
+    }
+    pub(crate) fn set_velocity(
+        &mut self,
+        id: VehicleId,
+        vx: i64,
+        vy: i64,
+    ) -> Result<(), CommandError> {
+        let i = self.slot(id).ok_or(CommandError::InvalidVehicle(id))?;
+        // Temporary guard safe for any u32 timestep and validated map extent.
+        const MAX_VELOCITY: i64 = 1_000_000;
+        if !(-MAX_VELOCITY..=MAX_VELOCITY).contains(&vx)
+            || !(-MAX_VELOCITY..=MAX_VELOCITY).contains(&vy)
+        {
+            return Err(CommandError::InvalidVelocity);
+        }
+        self.vx[i] = vx;
+        self.vy[i] = vy;
+        Ok(())
     }
 
     pub(crate) fn move_parallel(&mut self, width: u32, height: u32, tick_ms: u32) {

@@ -32,3 +32,16 @@ Use Rust's built-in test framework and descriptive behavior-based test names. Ad
 ## Commit & Pull Request Guidelines
 
 No existing commit history establishes conventions. Use concise imperative subjects, such as `Add deterministic vehicle movement`. Keep changes focused. Pull requests should explain behavior, link relevant issues, report validation and document limitations; include screenshots only for visible interface changes.
+
+## Commands, IDs and snapshots
+
+- Never assume `VehicleId` is an array index; resolve identity through controlled APIs.
+- External authoritative changes must use commands, applied before Movement.
+- Renderers must not receive mutable simulation state; consume owned snapshots.
+- Snapshot representation must not dictate internal simulation storage.
+- Internal dirty flags are not an external synchronization protocol; prefer revisions.
+- Do not introduce concurrent command producers without a concrete need and benchmark.
+- Every new command needs deterministic behavior tests across thread counts.
+- Keep next sequence and pending commands represented in the deterministic checksum.
+- Configuration and velocity bounds are temporary safety guards, not game design limits.
+- Tick phases are ApplyCommands, Movement, Finalize; Diagnostics remains on demand.

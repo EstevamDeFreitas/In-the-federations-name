@@ -1,0 +1,440 @@
+{
+  "environment": {
+    "os": "windows",
+    "architecture": "x86_64",
+    "logical_cpus": 12,
+    "build_mode": "release"
+  },
+  "scenario": {
+    "width": 512,
+    "height": 512,
+    "chunk_size": 32,
+    "vehicles": 100000,
+    "seed": 42,
+    "tick_ms": 20
+  },
+  "warmup_ticks": 100,
+  "measured_ticks": 2000,
+  "total_simulated_ticks": 2100,
+  "checksum_algorithm": "FNV-1a-64 / federation-state-v2",
+  "checksums_match": true,
+  "results": [
+    {
+      "threads": 1,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 0.8931157300000069,
+        "median_ms": 0.8661,
+        "p95_ms": 0.9974999999999999,
+        "p99_ms": 1.3595,
+        "tick_seconds": 8.931157300000068,
+        "ticks_per_second": 1119.6757222045483
+      },
+      "speedup": 0.9999999999999909,
+      "checksum": "3790c64fca08d326",
+      "runs": [
+        {
+          "mean_ms": 0.8964433500000014,
+          "median_ms": 0.8664000000000001,
+          "p95_ms": 1.0101,
+          "p99_ms": 1.4199,
+          "tick_seconds": 1.7928867000000028,
+          "ticks_per_second": 1115.5194580895698
+        },
+        {
+          "mean_ms": 0.8977710500000007,
+          "median_ms": 0.8697,
+          "p95_ms": 1.0223,
+          "p99_ms": 1.2068999999999999,
+          "tick_seconds": 1.7955421000000014,
+          "ticks_per_second": 1113.8697332688544
+        },
+        {
+          "mean_ms": 0.8823988000000001,
+          "median_ms": 0.8644,
+          "p95_ms": 0.9493,
+          "p99_ms": 1.1735,
+          "tick_seconds": 1.7647976000000003,
+          "ticks_per_second": 1133.2744332834538
+        },
+        {
+          "mean_ms": 0.8932281500000019,
+          "median_ms": 0.8647,
+          "p95_ms": 0.9852000000000001,
+          "p99_ms": 1.4193,
+          "tick_seconds": 1.7864563000000038,
+          "ticks_per_second": 1119.5348019428159
+        },
+        {
+          "mean_ms": 0.8957372999999995,
+          "median_ms": 0.8667,
+          "p95_ms": 1.021,
+          "p99_ms": 1.3935,
+          "tick_seconds": 1.791474599999999,
+          "ticks_per_second": 1116.3987477131973
+        }
+      ],
+      "run_statistics": {
+        "median_mean_ms": 0.8957372999999995,
+        "min_mean_ms": 0.8823988000000001,
+        "max_mean_ms": 0.8977710500000007,
+        "stddev_mean_ms": 0.0055584694892211175
+      }
+    },
+    {
+      "threads": 2,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 0.46496045000000025,
+        "median_ms": 0.4522,
+        "p95_ms": 0.5519000000000001,
+        "p99_ms": 0.778,
+        "tick_seconds": 4.649604500000002,
+        "ticks_per_second": 2150.720561286448
+      },
+      "speedup": 1.9208423641193533,
+      "checksum": "3790c64fca08d326",
+      "runs": [
+        {
+          "mean_ms": 0.4738983999999999,
+          "median_ms": 0.4543,
+          "p95_ms": 0.5888,
+          "p99_ms": 0.8235,
+          "tick_seconds": 0.9477967999999998,
+          "ticks_per_second": 2110.1569450329443
+        },
+        {
+          "mean_ms": 0.4677915500000013,
+          "median_ms": 0.45085000000000003,
+          "p95_ms": 0.5878,
+          "p99_ms": 0.7787000000000001,
+          "tick_seconds": 0.9355831000000026,
+          "ticks_per_second": 2137.704283029476
+        },
+        {
+          "mean_ms": 0.47086444999999977,
+          "median_ms": 0.45845,
+          "p95_ms": 0.5301,
+          "p99_ms": 0.7205,
+          "tick_seconds": 0.9417288999999995,
+          "ticks_per_second": 2123.7534496392764
+        },
+        {
+          "mean_ms": 0.4579355499999998,
+          "median_ms": 0.4501,
+          "p95_ms": 0.513,
+          "p99_ms": 0.6225999999999999,
+          "tick_seconds": 0.9158710999999996,
+          "ticks_per_second": 2183.7134068320324
+        },
+        {
+          "mean_ms": 0.4543123000000001,
+          "median_ms": 0.4456,
+          "p95_ms": 0.509,
+          "p99_ms": 0.6775,
+          "tick_seconds": 0.9086246000000002,
+          "ticks_per_second": 2201.129047133436
+        }
+      ],
+      "run_statistics": {
+        "median_mean_ms": 0.4677915500000013,
+        "min_mean_ms": 0.4543123000000001,
+        "max_mean_ms": 0.4738983999999999,
+        "stddev_mean_ms": 0.007556343187614004
+      }
+    },
+    {
+      "threads": 4,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 0.2783322899999999,
+        "median_ms": 0.251,
+        "p95_ms": 0.3795,
+        "p99_ms": 0.4418,
+        "tick_seconds": 2.783322899999999,
+        "ticks_per_second": 3592.8278389833977
+      },
+      "speedup": 3.208811058177975,
+      "checksum": "3790c64fca08d326",
+      "runs": [
+        {
+          "mean_ms": 0.25778745000000025,
+          "median_ms": 0.2427,
+          "p95_ms": 0.363,
+          "p99_ms": 0.4104,
+          "tick_seconds": 0.5155749000000005,
+          "ticks_per_second": 3879.1647925451725
+        },
+        {
+          "mean_ms": 0.24873470000000014,
+          "median_ms": 0.23625,
+          "p95_ms": 0.3393,
+          "p99_ms": 0.39,
+          "tick_seconds": 0.49746940000000034,
+          "ticks_per_second": 4020.3477842054176
+        },
+        {
+          "mean_ms": 0.34836405000000026,
+          "median_ms": 0.34104999999999996,
+          "p95_ms": 0.4037,
+          "p99_ms": 0.4536,
+          "tick_seconds": 0.6967281000000005,
+          "ticks_per_second": 2870.5602659057363
+        },
+        {
+          "mean_ms": 0.26717725000000003,
+          "median_ms": 0.24075,
+          "p95_ms": 0.3966,
+          "p99_ms": 0.5506000000000001,
+          "tick_seconds": 0.5343545000000001,
+          "ticks_per_second": 3742.833643208768
+        },
+        {
+          "mean_ms": 0.2695980000000002,
+          "median_ms": 0.2482,
+          "p95_ms": 0.374,
+          "p99_ms": 0.43389999999999995,
+          "tick_seconds": 0.5391960000000005,
+          "ticks_per_second": 3709.2263295721746
+        }
+      ],
+      "run_statistics": {
+        "median_mean_ms": 0.26717725000000003,
+        "min_mean_ms": 0.24873470000000014,
+        "max_mean_ms": 0.34836405000000026,
+        "stddev_mean_ms": 0.03578624856655699
+      }
+    },
+    {
+      "threads": 8,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 0.20003797000000043,
+        "median_ms": 0.1963,
+        "p95_ms": 0.24649999999999997,
+        "p99_ms": 0.3128,
+        "tick_seconds": 2.0003797000000043,
+        "ticks_per_second": 4999.050930180894
+      },
+      "speedup": 4.464731020815682,
+      "checksum": "3790c64fca08d326",
+      "runs": [
+        {
+          "mean_ms": 0.20472994999999988,
+          "median_ms": 0.2001,
+          "p95_ms": 0.25549999999999995,
+          "p99_ms": 0.3301,
+          "tick_seconds": 0.40945989999999977,
+          "ticks_per_second": 4884.483193592342
+        },
+        {
+          "mean_ms": 0.1990601,
+          "median_ms": 0.19619999999999999,
+          "p95_ms": 0.2427,
+          "p99_ms": 0.3045,
+          "tick_seconds": 0.3981202,
+          "ticks_per_second": 5023.6084479009105
+        },
+        {
+          "mean_ms": 0.19916114999999998,
+          "median_ms": 0.1959,
+          "p95_ms": 0.24469999999999997,
+          "p99_ms": 0.30479999999999996,
+          "tick_seconds": 0.39832229999999996,
+          "ticks_per_second": 5021.059579139807
+        },
+        {
+          "mean_ms": 0.19821465000000008,
+          "median_ms": 0.1948,
+          "p95_ms": 0.2432,
+          "p99_ms": 0.2988,
+          "tick_seconds": 0.39642930000000015,
+          "ticks_per_second": 5045.035773087406
+        },
+        {
+          "mean_ms": 0.19902399999999962,
+          "median_ms": 0.19565000000000002,
+          "p95_ms": 0.24449999999999997,
+          "p99_ms": 0.328,
+          "tick_seconds": 0.39804799999999924,
+          "ticks_per_second": 5024.5196559209035
+        }
+      ],
+      "run_statistics": {
+        "median_mean_ms": 0.1990601,
+        "min_mean_ms": 0.19821465000000008,
+        "max_mean_ms": 0.20472994999999988,
+        "stddev_mean_ms": 0.002370331215378959
+      }
+    },
+    {
+      "threads": 12,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 0.19021768000000058,
+        "median_ms": 0.1829,
+        "p95_ms": 0.24350000000000002,
+        "p99_ms": 0.3214,
+        "tick_seconds": 1.9021768000000057,
+        "ticks_per_second": 5257.134878314135
+      },
+      "speedup": 4.695229854553983,
+      "checksum": "3790c64fca08d326",
+      "runs": [
+        {
+          "mean_ms": 0.19655554999999947,
+          "median_ms": 0.1875,
+          "p95_ms": 0.2621,
+          "p99_ms": 0.3662,
+          "tick_seconds": 0.39311109999999894,
+          "ticks_per_second": 5087.62026816339
+        },
+        {
+          "mean_ms": 0.1873093499999997,
+          "median_ms": 0.1811,
+          "p95_ms": 0.23450000000000001,
+          "p99_ms": 0.3207,
+          "tick_seconds": 0.3746186999999994,
+          "ticks_per_second": 5338.761786317669
+        },
+        {
+          "mean_ms": 0.18753759999999986,
+          "median_ms": 0.18125,
+          "p95_ms": 0.2368,
+          "p99_ms": 0.2821,
+          "tick_seconds": 0.3750751999999997,
+          "ticks_per_second": 5332.264036651854
+        },
+        {
+          "mean_ms": 0.1920952500000002,
+          "median_ms": 0.18430000000000002,
+          "p95_ms": 0.2475,
+          "p99_ms": 0.331,
+          "tick_seconds": 0.3841905000000004,
+          "ticks_per_second": 5205.7507929009125
+        },
+        {
+          "mean_ms": 0.18759065000000033,
+          "median_ms": 0.1817,
+          "p95_ms": 0.2319,
+          "p99_ms": 0.29329999999999995,
+          "tick_seconds": 0.37518130000000066,
+          "ticks_per_second": 5330.756090455458
+        }
+      ],
+      "run_statistics": {
+        "median_mean_ms": 0.18759065000000033,
+        "min_mean_ms": 0.1873093499999997,
+        "max_mean_ms": 0.19655554999999947,
+        "stddev_mean_ms": 0.00363968031722553
+      }
+    },
+    {
+      "threads": 16,
+      "oversubscribed": true,
+      "timing": {
+        "mean_ms": 0.17592970000000008,
+        "median_ms": 0.165,
+        "p95_ms": 0.2248,
+        "p99_ms": 0.3371,
+        "tick_seconds": 1.7592970000000008,
+        "ticks_per_second": 5684.088587657454
+      },
+      "speedup": 5.076548928350349,
+      "checksum": "3790c64fca08d326",
+      "runs": [
+        {
+          "mean_ms": 0.1791956999999999,
+          "median_ms": 0.16775,
+          "p95_ms": 0.23299999999999998,
+          "p99_ms": 0.348,
+          "tick_seconds": 0.3583913999999998,
+          "ticks_per_second": 5580.491049729433
+        },
+        {
+          "mean_ms": 0.17095375000000015,
+          "median_ms": 0.1628,
+          "p95_ms": 0.20909999999999998,
+          "p99_ms": 0.3248,
+          "tick_seconds": 0.3419075000000003,
+          "ticks_per_second": 5849.535327537414
+        },
+        {
+          "mean_ms": 0.17115674999999994,
+          "median_ms": 0.16335,
+          "p95_ms": 0.2119,
+          "p99_ms": 0.29760000000000003,
+          "tick_seconds": 0.3423134999999999,
+          "ticks_per_second": 5842.59750199744
+        },
+        {
+          "mean_ms": 0.1845713500000003,
+          "median_ms": 0.1771,
+          "p95_ms": 0.2448,
+          "p99_ms": 0.34890000000000004,
+          "tick_seconds": 0.3691427000000006,
+          "ticks_per_second": 5417.95896275342
+        },
+        {
+          "mean_ms": 0.17377094999999965,
+          "median_ms": 0.1634,
+          "p95_ms": 0.2197,
+          "p99_ms": 0.3436,
+          "tick_seconds": 0.3475418999999993,
+          "ticks_per_second": 5754.701807177794
+        }
+      ],
+      "run_statistics": {
+        "median_mean_ms": 0.17377094999999965,
+        "min_mean_ms": 0.17095375000000015,
+        "max_mean_ms": 0.1845713500000003,
+        "stddev_mean_ms": 0.005244925211859652
+      }
+    }
+  ],
+  "runs": 5,
+  "order_seed": 42,
+  "shuffle_thread_order": true,
+  "execution_orders": [
+    [
+      12,
+      8,
+      1,
+      4,
+      16,
+      2
+    ],
+    [
+      4,
+      8,
+      2,
+      12,
+      16,
+      1
+    ],
+    [
+      8,
+      1,
+      12,
+      4,
+      2,
+      16
+    ],
+    [
+      8,
+      16,
+      1,
+      2,
+      12,
+      4
+    ],
+    [
+      4,
+      16,
+      8,
+      12,
+      2,
+      1
+    ]
+  ]
+}

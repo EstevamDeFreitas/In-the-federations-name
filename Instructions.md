@@ -1,414 +1,1374 @@
-# CODEX TASK 001 — In The Federation's Name: Simulation Foundation
+# CODEX TASK 002 — Deterministic Commands & Immutable Snapshots
 
-## 1. Contexto do projeto
+## 1. Contexto
 
-Você está desenvolvendo **In The Federation's Name**, um jogo de construção de cidades, transporte, logística e simulação econômica em larga escala.
+O projeto **In The Federation's Name** já possui o Marco 001 concluído e revisado.
 
-Referências conceituais:
-- **OpenTTD:** terreno baseado em tiles, redes de transporte, rotas e legibilidade.
-- **Workers & Resources: Soviet Republic:** cadeias produtivas, construção física, logística e economia.
-- **SimCity 4:** câmera ortográfica isométrica, com quatro rotações discretas.
+A base atual contém:
 
-A tecnologia principal está definida como **Rust**.
+- workspace Rust;
+- `federation-sim` como núcleo headless;
+- terreno baseado em heightmap global;
+- chunks com `dirty` e `revision`;
+- veículos armazenados em SoA;
+- scheduler com pool Rayon própria;
+- timestep fixo;
+- inicialização determinística;
+- checksum estável;
+- testes de determinismo entre diferentes quantidades de threads;
+- executável headless;
+- microbenchmark multithread;
+- CI.
 
-O jogo terá futuramente modelos 3D pixelizados e um renderer próprio ou desacoplado, possivelmente baseado em `wgpu`. **Não implemente renderização nesta tarefa.**
+A arquitetura atual foi aprovada como fundação.
 
-A prioridade arquitetural absoluta é permitir uma simulação eficiente, paralela, testável e independente de qualquer frontend.
+Esta tarefa deve **evoluir a implementação existente**, sem reescrever componentes que já funcionam.
 
-## 2. Objetivo desta tarefa
+---
 
-Criar a primeira versão funcional do núcleo de simulação, com:
+# 2. Objetivo
 
-1. Workspace Rust organizado em crates independentes.
-2. Terreno em grade com alturas editáveis e metadados por chunk.
-3. Armazenamento orientado a dados para entidades móveis.
-4. Scheduler de simulação com timestep fixo e fases explícitas.
-5. Atualização multithread usando Rayon.
-6. Inicialização reproduzível com seed.
-7. Execução headless por linha de comando.
-8. Benchmarks comparativos de desempenho.
-9. Testes automatizados, documentação e CI.
+Criar uma fronteira formal entre:
 
-**Esta tarefa deve resultar em código compilável e executável, não apenas em um documento de arquitetura.**
+```text
+futuro frontend / ferramentas
+            ↓
+         COMMANDS
+            ↓
+    Simulation autoritativa
+            ↓
+        SNAPSHOTS
+            ↓
+futuro frontend / ferramentas
+```
 
-Se o repositório estiver vazio, inicialize-o. Se já houver arquivos, examine-os primeiro e preserve o que for compatível com estes requisitos.
+A simulação deve permanecer como única proprietária do estado mutável.
 
-## 3. Estrutura esperada do repositório
+O consumidor externo poderá:
 
-Organize o projeto aproximadamente assim:
+1. solicitar mudanças por comandos;
+2. avançar a simulação;
+3. consultar snapshots imutáveis;
+4. detectar alterações incrementais através de revisões.
 
-- `Cargo.toml` — workspace.
-- `Cargo.lock` — versionado.
-- `rust-toolchain.toml` — toolchain stable.
-- `.gitignore`.
-- `.github/workflows/ci.yml`.
-- `AGENTS.md` — convenções e regras de desenvolvimento.
-- `README.md` — visão geral e instruções de execução.
-- `docs/architecture.md` — arquitetura, decisões e limites.
-- `docs/benchmarks.md` — metodologia e resultados medidos.
-- `crates/federation-sim/`
-  - `Cargo.toml`
-  - `src/lib.rs`
-  - `src/config.rs`
-  - `src/terrain.rs`
-  - `src/chunk.rs`
-  - `src/entities.rs`
-  - `src/scheduler.rs`
-  - `src/simulation.rs`
-  - `src/rng.rs`
-  - `src/metrics.rs`
-- `crates/federation-headless/`
-  - `Cargo.toml`
-  - `src/main.rs`
-- `crates/federation-bench/`
-  - `Cargo.toml`
-  - `src/main.rs`
+O objetivo arquitetural é preparar o núcleo para:
 
-Pequenos ajustes na organização são permitidos quando tecnicamente justificados. Não crie dezenas de crates antecipadamente.
+- renderer futuro;
+- ferramentas de edição;
+- construção de estradas;
+- terraformação;
+- UI;
+- debugging;
+- replay;
+- savegame;
+- possíveis sistemas de rede no futuro.
 
-Use Rust edition 2024, caso o toolchain disponível suporte essa edição.
+**Não implemente nenhum desses sistemas nesta tarefa.**
 
-## 4. Arquitetura obrigatória
+---
 
-### 4.1. Núcleo independente
+# 3. Princípio fundamental
 
-O crate `federation-sim` não pode depender de:
-- Godot;
-- `wgpu`;
-- `winit`;
-- APIs de janela;
-- sistemas de UI;
-- frameworks de jogos completos.
+Depois deste marco:
 
-Ele deve funcionar como biblioteca Rust pura.
+> Estado autoritativo da simulação não deve ser alterável diretamente por um consumidor externo.
 
-O frontend futuro deverá interagir com a simulação por comandos e snapshots, sem acesso irrestrito a estados mutáveis internos.
+Operações externas devem seguir:
 
-Não é necessário implementar esse protocolo nesta tarefa.
+```text
+submit command
+      ↓
+pending commands
+      ↓
+tick boundary
+      ↓
+validation
+      ↓
+deterministic application
+      ↓
+simulation phases
+```
 
-### 4.2. Terreno e chunks
+E leitura deve seguir:
 
-Implemente um terreno retangular com:
+```text
+Simulation
+    ↓
+immutable snapshot
+    ↓
+consumer
+```
 
-- Dimensões configuráveis em tiles.
-- Chunk size configurável, com padrão de 32 × 32 tiles.
-- Alturas inteiras nos vértices dos tiles.
-- Leitura e alteração de alturas por coordenadas.
-- Validação de limites.
-- Metadados de dirty state e revision por chunk.
+---
 
-**Decisão de implementação inicial:** use um heightmap global contíguo como fonte autoritativa das alturas e chunks como unidades de indexação e invalidação.
+# 4. IDs tipados e opacos
 
-Isso evita duplicação inconsistente de vértices nas fronteiras.
+Este é um requisito importante deste marco.
 
-Ao alterar um vértice compartilhado por chunks adjacentes, todos os chunks afetados devem ser invalidados.
+Atualmente os veículos possuem IDs sequenciais que coincidem com sua posição nos arrays internos.
 
-Inclua testes específicos para vértices nas fronteiras e cantos dos chunks.
+Isso é aceitável como implementação inicial, mas **não deve virar contrato público**.
 
-Não implemente geração de mesh, escavação, pontes ou túneis agora.
+Crie um tipo público equivalente a:
 
-### 4.3. Entidades móveis e SoA
-
-Implemente um armazenamento **Structure of Arrays (SoA)** para veículos sintéticos.
-
-Campos mínimos:
-- ID estável.
-- Posição X.
-- Posição Y.
-- Velocidade X.
-- Velocidade Y.
-
-Use representação inteira/fixed-point para o estado simulado. Não dependa de floats para obter determinismo nesta etapa.
-
-O ID de uma entidade não deve depender de seu endereço na memória. Nesta primeira versão, não é necessário implementar remoção e reutilização de IDs.
-
-O sistema deve conseguir inicializar pelo menos 100.000 veículos sintéticos sem criar um objeto de runtime pesado para cada um.
-
-A movimentação será artificial e simplificada. Seu objetivo é exercitar o processamento paralelo e o layout de memória, **não representar tráfego real**.
-
-### 4.4. Scheduler multithread
-
-Implemente uma simulação com timestep fixo.
-
-A API pública deve oferecer algo equivalente a:
-
-- `SimulationConfig`
-- `Simulation::new(config)`
-- `Simulation::tick()`
-- `Simulation::checksum()`
-- `Simulation::tick_count()`
-
-O scheduler deve possuir fases explícitas e ordenadas.
-
-Para esta primeira versão:
-- **Movement:** atualizar as entidades em paralelo.
-- **Finalize:** concluir o tick e atualizar contadores.
-- **Diagnostics:** disponibilizar métricas, quando solicitado.
-
-Evite criar um framework genérico de jobs excessivamente abstrato. Prefira uma implementação pequena, extensível e comprovadamente funcional.
-
-Use `rayon` com pool de threads configurável.
+```rust
+pub struct VehicleId(u64);
+```
 
 Requisitos:
-- Partições disjuntas para escrita.
-- Nenhum `Mutex` por veículo.
-- Nenhum spawn de task por entidade.
-- Nenhuma dependência de ordem de execução entre partições.
-- Nenhum estado global mutável compartilhado sem necessidade.
-- Evitar alocações por entidade a cada tick.
 
-Documente como serão adicionadas futuramente fases de pathfinding, economia, demografia e aplicação de comandos.
+- `VehicleId` deve ser um tipo distinto.
+- Não exponha o valor interno como representação de slot.
+- O consumidor não pode assumir que:
 
-Não implemente essas fases ainda.
+```text
+vehicle_id == index do Vec
+```
 
-### 4.5. Determinismo
+- Internamente, a implementação atual pode continuar usando correspondência direta enquanto não houver remoções.
+- Documente explicitamente que isso é um detalhe interno temporário.
+- APIs públicas devem usar `VehicleId`.
+- O projeto deve permanecer livre para futuramente usar:
+  - sparse sets;
+  - generation IDs;
+  - free lists;
+  - tabelas ID → slot;
+  - compactação de SoA.
 
-Duas simulações com a mesma configuração e seed devem produzir o mesmo estado final após o mesmo número de ticks, independentemente da quantidade de threads.
+Não implemente ainda remoção ou reutilização de IDs.
 
-Implemente:
-- Gerador pseudoaleatório determinístico para inicialização.
-- Seed configurável.
-- Checksum estável do estado simulado.
-- Testes comparando execuções com 1, 2 e 4 threads.
+Não crie um sistema genérico complexo de entity IDs nesta etapa.
 
-Não use `DefaultHasher` como checksum persistente. Escolha e documente um algoritmo estável.
+---
 
-Evite reduções paralelas com ordem variável sobre números de ponto flutuante.
+# 5. Sistema de comandos
 
-O checksum não precisa ser recalculado integralmente dentro do caminho crítico de cada tick.
+Criar tipos públicos aproximadamente equivalentes a:
 
-### 4.6. Configuração e validação
+```rust
+SimulationCommand
+CommandEnvelope
+CommandSequence
+CommandResult
+CommandError
+```
 
-A configuração deve contemplar:
-- Largura do mapa.
-- Altura do mapa.
-- Tamanho dos chunks.
-- Quantidade de veículos.
-- Quantidade de threads.
-- Seed.
-- Duração lógica fixa do tick.
+Os nomes exatos podem variar se houver justificativa clara.
 
-Use valores padrão sensatos.
+## 5.1 Comandos iniciais
 
-Retorne erros claros para configurações inválidas, em vez de provocar panic.
+Implementar pelo menos:
 
-Não fixe ainda a escala física definitiva dos tiles nem a velocidade temporal final do jogo. Documente as unidades provisórias utilizadas.
+```text
+SetTerrainVertexHeight
+SetVehicleVelocity
+```
 
-## 5. Executável headless
+Exemplo conceitual:
 
-Crie o binário `federation-headless`.
+```rust
+SimulationCommand::SetTerrainVertexHeight {
+    x,
+    y,
+    height,
+}
+```
 
-Exemplo de execução esperada:
+e:
 
-`cargo run -p federation-headless --release -- --width 512 --height 512 --vehicles 100000 --ticks 200 --threads 8 --seed 42`
+```rust
+SimulationCommand::SetVehicleVelocity {
+    vehicle_id,
+    vx,
+    vy,
+}
+```
 
-Ele deve:
+---
 
-1. Criar a simulação.
-2. Inicializar o terreno e os veículos.
-3. Executar a quantidade solicitada de ticks.
-4. Medir o tempo de execução.
-5. Imprimir um resumo legível.
-6. Exibir o checksum final.
-7. Encerrar normalmente.
+# 6. Submissão e aplicação
 
-Inclua opção para exportar métricas em JSON.
+Um comando enviado à simulação **não deve alterar imediatamente o estado autoritativo**.
 
-O núcleo não deve dormir entre ticks. A responsabilidade de sincronizar tempo real será de um host futuro.
+Exemplo:
 
-## 6. Benchmark de paralelismo
+```rust
+simulation.submit_command(command)?;
+```
 
-Crie o binário `federation-bench`.
+não deve modificar terreno ou veículo naquele instante.
 
-Exemplo de execução:
+A alteração deve acontecer apenas durante:
 
-`cargo run -p federation-bench --release -- --width 512 --height 512 --vehicles 100000 --ticks 200 --warmup 30 --threads 1,2,4,8,16 --seed 42 --output-json target/bench-results.json`
+```rust
+simulation.tick()
+```
 
-O benchmark deve:
+em uma fase explícita de comandos.
 
-- Inicializar uma simulação nova e equivalente para cada quantidade de threads.
-- Excluir a inicialização das medições de tick.
-- Executar warmup antes das medições.
-- Usar a mesma seed e configuração.
-- Medir os ticks com `Instant`.
-- Comparar 1, 2, 4, 8 e 16 threads.
-- Calcular média, mediana, p95 e, se viável, p99.
-- Calcular ticks por segundo e speedup relativo à execução com uma thread.
-- Comparar os checksums finais para validar consistência.
-- Exportar resultados estruturados em JSON.
+A nova ordem mínima do scheduler será:
 
-Inclua informações do ambiente, quando disponíveis, como sistema operacional, arquitetura, quantidade de CPUs lógicas e modo de compilação.
+```text
+ApplyCommands
+     ↓
+Movement
+     ↓
+Finalize
+```
 
-Se o hardware possuir menos threads físicas/lógicas que o solicitado, permita o teste, mas identifique o oversubscription no relatório.
+A fase `Diagnostics` continua sob demanda.
 
-**Não invente resultados de desempenho.**
+---
 
-Não estabeleça como critério obrigatório que 8 ou 16 threads sejam mais rápidos. Nesta etapa queremos medições reais e identificação de gargalos.
+# 7. Sequenciamento determinístico
 
-Documente claramente que este benchmark mede uma carga sintética de movimentação, não a capacidade final de simular cidades completas.
+Cada comando pendente deve possuir uma sequência estável.
 
-## 7. Dependências e práticas
+Crie algo conceitualmente equivalente a:
 
-Dependências recomendadas:
-- `rayon` para paralelismo.
-- `clap` para CLI.
-- `serde` e `serde_json` para relatórios.
-- `thiserror`, se útil para erros tipados.
+```rust
+CommandSequence(u64)
+```
 
-Prefira a biblioteca padrão para o restante.
+A ordem de aplicação deve ser definida explicitamente.
 
-Não introduza nesta tarefa:
-- Bevy ECS;
-- banco de dados;
-- Tokio;
-- Godot;
+Requisitos:
+
+- comandos devem ser aplicados em ordem determinística;
+- a ordem não pode depender do Rayon;
+- a ordem não pode depender de endereço de memória;
+- a ordem não pode depender de hash map com ordenação instável;
+- a quantidade de threads não pode alterar o resultado;
+- dois comandos sobre o mesmo objeto devem respeitar a sequência.
+
+Exemplo:
+
+```text
+sequence 10:
+SetHeight(20,20,4)
+
+sequence 11:
+SetHeight(20,20,7)
+```
+
+Resultado:
+
+```text
+height = 7
+```
+
+Não permita duas sequências iguais dentro da mesma fila, salvo se houver uma regra explícita e testada.
+
+A opção preferida é rejeitar duplicação.
+
+---
+
+# 8. Origem da sequência
+
+Nesta etapa, não implemente produtores concorrentes.
+
+A própria `Simulation` pode emitir uma sequência monotônica no momento da submissão.
+
+Exemplo conceitual:
+
+```text
+submit A → sequence 1
+submit B → sequence 2
+submit C → sequence 3
+```
+
+Isso deverá ser determinístico para uma mesma ordem de chamadas.
+
+No futuro poderemos separar:
+
+```text
+client command id
+simulation sequence
+network sequence
+```
+
+Mas não antecipe essa complexidade agora.
+
+---
+
+# 9. Validação dos comandos
+
+Comandos devem ser validados antes de modificar o estado.
+
+Erros possíveis incluem:
+
+- vértice fora do mapa;
+- `VehicleId` inexistente;
+- valor fora de limites aceitos;
+- sequence inválida;
+- overflow de sequence.
+
+Um comando inválido:
+
+- não deve causar panic;
+- não deve corromper a fila;
+- não deve impedir necessariamente os comandos seguintes;
+- deve produzir um resultado explícito.
+
+A política recomendada é:
+
+```text
+cada comando produz seu próprio resultado
+```
+
+Exemplo:
+
+```text
+command 10 → Ok
+command 11 → InvalidVehicle
+command 12 → Ok
+```
+
+---
+
+# 10. Resultado da aplicação
+
+A aplicação do tick deve permitir consultar os resultados dos comandos processados.
+
+Pode existir algo conceitualmente como:
+
+```rust
+AppliedCommandResult {
+    sequence,
+    result,
+}
+```
+
+Não é necessário guardar o histórico indefinidamente.
+
+Uma estratégia simples é manter os resultados do último tick ou retorná-los por uma API explícita.
+
+Documente a escolha.
+
+---
+
+# 11. Remover mutações externas diretas
+
+Hoje existe uma API pública semelhante a:
+
+```rust
+Simulation::set_height(...)
+```
+
+Após este marco, consumidores externos não devem poder modificar estado autoritativo por esse caminho.
+
+A alteração de terreno deve passar por:
+
+```text
+SimulationCommand::SetTerrainVertexHeight
+```
+
+Portanto:
+
+- tornar setters autoritativos internos (`pub(crate)` ou equivalente);
+- preservar funções internas necessárias para testes unitários de `Terrain`;
+- a API pública de `Simulation` não deve permitir contornar a fila de comandos.
+
+Faça o mesmo para alterações de veículos introduzidas neste marco.
+
+---
+
+# 12. Snapshots imutáveis
+
+Criar uma camada pública de leitura independente.
+
+Não exponha `&Simulation` como futura API do renderer.
+
+Criar estruturas equivalentes a:
+
+```rust
+SimulationSnapshot
+RegionSnapshot
+VehicleSnapshot
+TerrainChunkSnapshot
+```
+
+Evite exagerar no número de tipos se uma estrutura mais simples for suficiente.
+
+---
+
+# 13. Propriedade dos snapshots
+
+Um snapshot deve possuir os dados necessários de forma independente.
+
+Este teste conceitual deve funcionar:
+
+```text
+snapshot A criado no tick 10
+
+simulation.tick()
+simulation.tick()
+simulation.tick()
+
+snapshot A continua representando tick 10
+```
+
+Ou seja:
+
+- não use referências mutáveis para estado interno;
+- não deixe snapshot apontando para buffers que serão sobrescritos;
+- snapshots antigos permanecem válidos.
+
+---
+
+# 14. Snapshot não significa copiar o mundo inteiro
+
+A criação de snapshot deve ser explícita e configurável.
+
+Não copie automaticamente:
+
+```text
+todo terreno
++
+todos os veículos
++
+todos os sistemas
+```
+
+a cada tick.
+
+Crie uma API de solicitação.
+
+Algo conceitualmente semelhante a:
+
+```rust
+SnapshotRequest {
+    vehicles: ...
+    terrain_chunks: ...
+}
+```
+
+ou APIs específicas.
+
+Escolha a abordagem mais simples que preserve extensibilidade.
+
+---
+
+# 15. Snapshot de veículos
+
+Inicialmente deve ser possível solicitar dados visuais mínimos de veículos:
+
+```text
+VehicleId
+x
+y
+vx
+vy
+```
+
+Esse formato será usado futuramente pelo renderer.
+
+Não inclua ainda:
+
+- mesh;
+- textura;
+- modelo;
+- cor;
+- rota;
+- carga;
+- proprietário.
+
+Esses dados ainda não existem na simulação.
+
+---
+
+# 16. Snapshot de terreno
+
+Deve ser possível solicitar dados de chunks específicos.
+
+Cada chunk retornado deve conter:
+
+```text
+chunk coordinate
+revision
+height data necessária
+```
+
+Não dependa de `dirty` como protocolo externo.
+
+---
+
+# 17. Revision como mecanismo de sincronização
+
+`dirty` continua sendo uma ferramenta interna válida.
+
+Porém consumidores externos devem detectar mudanças através de:
+
+```text
+chunk.revision
+```
+
+Exemplo:
+
+```text
+renderer possui:
+chunk (4,2) revision 18
+
+simulation possui:
+chunk (4,2) revision 20
+```
+
+Então:
+
+```text
+renderer solicita atualização
+```
+
+Isso é importante porque futuramente poderemos ter simultaneamente:
+
+```text
+renderer
+debugger
+editor
+telemetry
+```
+
+e nenhum deles deve precisar limpar um `dirty flag` global.
+
+---
+
+# 18. Consulta incremental
+
+Criar uma API equivalente a:
+
+```text
+get chunks changed since known revisions
+```
+
+Não precisa ser extremamente sofisticada.
+
+Uma solução inicial pode aceitar algo como:
+
+```rust
+ChunkRevisionQuery
+```
+
+contendo:
+
+```text
+chunk coordinate
+known revision
+```
+
+e retornar somente os chunks divergentes.
+
+Alternativamente:
+
+```text
+snapshot_chunks_if_newer(...)
+```
+
+É aceitável.
+
+O importante é provar o conceito.
+
+---
+
+# 19. Revisão e overflow
+
+A implementação atual usa `u64` para revisão de chunk.
+
+Não precisa substituir isso.
+
+Porém documente o comportamento atual em overflow.
+
+Se continuar saturando em `u64::MAX`, isso deve permanecer explícito.
+
+Não crie mecanismo complexo de epoch nesta etapa.
+
+---
+
+# 20. Dirty state
+
+`clear_terrain_dirty()` não deve fazer parte do protocolo público necessário ao frontend.
+
+Se continuar existindo:
+
+- deve ser API interna;
+- ou claramente documentada como ferramenta interna.
+
+Um consumidor nunca deve precisar chamar:
+
+```text
+clear all dirty flags
+```
+
+para sincronizar estado.
+
+---
+
+# 21. Scheduler
+
+Atualizar as fases documentadas para:
+
+```text
+ApplyCommands
+Movement
+Finalize
+```
+
+O comportamento deve ser:
+
+### ApplyCommands
+
+```text
+ordenar/verificar sequência
+validar
+aplicar de forma determinística
+armazenar resultados
+```
+
+### Movement
+
+```text
+executar atualização paralela dos veículos
+```
+
+### Finalize
+
+```text
+incrementar tick
+finalizar bookkeeping
+```
+
+Não paralelize `ApplyCommands` nesta etapa.
+
+O volume ainda será pequeno e determinismo é mais importante.
+
+---
+
+# 22. Sem comandos
+
+Executar:
+
+```rust
+simulation.tick()
+```
+
+sem comandos pendentes deve continuar tendo custo mínimo.
+
+Evite:
+
+- alocar vetor novo todo tick;
+- ordenar vetor vazio;
+- criar estruturas temporárias desnecessárias.
+
+---
+
+# 23. Determinismo
+
+Preservar os requisitos do Marco 001.
+
+Mesmo cenário:
+
+```text
+seed igual
+comandos iguais
+ordem igual
+ticks iguais
+```
+
+deve produzir:
+
+```text
+estado igual
+checksum igual
+```
+
+em:
+
+```text
+1 thread
+2 threads
+4 threads
+8 threads
+```
+
+se o ambiente permitir.
+
+---
+
+# 24. Checksum
+
+Atualizar o checksum se necessário para incluir qualquer novo estado **autoritativo persistente**.
+
+Não inclua no checksum:
+
+- snapshots;
+- caches puramente derivados;
+- dados temporários de benchmark.
+
+Avalie cuidadosamente se:
+
+```text
+next_command_sequence
+```
+
+e filas pendentes devem fazer parte do checksum.
+
+Se dois estados possuem o mesmo mundo mas filas diferentes que modificarão o próximo tick, eles não são logicamente equivalentes.
+
+Portanto, o estado determinístico deve considerar comandos pendentes ou documentar outra forma de representação.
+
+---
+
+# 25. Testes obrigatórios — comandos
+
+Adicionar testes cobrindo:
+
+1. comando submetido não altera estado imediatamente;
+2. comando é aplicado no próximo tick;
+3. comandos respeitam sequência;
+4. dois comandos sobre mesmo vértice produzem resultado previsível;
+5. comando de terreno fora do mapa retorna erro;
+6. comando para `VehicleId` inexistente retorna erro;
+7. alteração de velocidade ocorre antes de `Movement`;
+8. nova velocidade afeta o movimento daquele mesmo tick;
+9. comando inválido não impede comando válido subsequente;
+10. sequência permanece monotônica;
+11. overflow ou condição extrema de sequência é tratada.
+
+---
+
+# 26. Testes obrigatórios — VehicleId
+
+Adicionar testes demonstrando:
+
+- `VehicleId` é usado pelas APIs públicas;
+- IDs permanecem estáveis entre ticks;
+- APIs não exigem conhecimento de índice interno;
+- um ID inexistente é rejeitado corretamente.
+
+Não é necessário implementar remoção para provar isso.
+
+---
+
+# 27. Testes obrigatórios — snapshots
+
+Adicionar testes cobrindo:
+
+1. snapshot possui tick correto;
+2. snapshot de veículo possui estado correto;
+3. snapshot antigo permanece inalterado após novos ticks;
+4. alteração do estado autoritativo não modifica snapshot anterior;
+5. consulta de chunk retorna revision correta;
+6. chunk não alterado não precisa ser reenviado;
+7. chunk alterado é retornado quando revision diverge;
+8. alteração em vértice compartilhado incrementa revisões relevantes;
+9. múltiplos consumidores podem manter revisions diferentes;
+10. limpar `dirty` não interfere no mecanismo por revision.
+
+---
+
+# 28. Testes obrigatórios — determinismo
+
+Construir cenário com:
+
+```text
+seed fixa
+sequência fixa de comandos
+múltiplos ticks
+```
+
+Rodar com pelo menos:
+
+```text
+1 thread
+2 threads
+4 threads
+```
+
+Comparar:
+
+- checksum;
+- terreno;
+- posições;
+- velocidades;
+- resultados dos comandos relevantes.
+
+Se possível, incluir 8 threads sem tornar a CI lenta.
+
+---
+
+# 29. Auditoria do benchmark do Marco 001
+
+O benchmark atual foi considerado válido como microbenchmark, porém preliminar.
+
+A tarefa deve melhorar sua metodologia.
+
+## Problema atual
+
+O resultado observado foi obtido com:
+
+```text
+100.000 veículos
+30 warmup ticks
+200 measured ticks
+uma execução
+ordem crescente de threads
+```
+
+O melhor resultado ocorreu com 16 threads em uma CPU com 12 CPUs lógicas.
+
+Isso não é necessariamente incorreto, mas deve ser investigado.
+
+---
+
+# 30. Benchmark — múltiplas rodadas
+
+Adicionar suporte a:
+
+```text
+--runs
+```
+
+Exemplo:
+
+```text
+--runs 5
+```
+
+Para cada quantidade de threads:
+
+```text
+criar simulação
+warmup
+medir ticks
+repetir N vezes
+```
+
+Gerar estatísticas entre execuções.
+
+---
+
+# 31. Benchmark — duração maior
+
+O benchmark deve permitir executar cenários significativamente maiores, por exemplo:
+
+```text
+2.000
+5.000
+10.000 ticks
+```
+
+Não altere necessariamente o default para algo muito pesado.
+
+Documente um perfil recomendado para benchmark manual.
+
+---
+
+# 32. Benchmark — ordem
+
+Evitar sempre executar:
+
+```text
+1 → 2 → 4 → 8 → 16
+```
+
+Adicionar opção para variar a ordem.
+
+Uma solução simples:
+
+```text
+--shuffle-thread-order
+```
+
+com seed explícita.
+
+Ou alternar rodadas em ordem diferente.
+
+A reprodutibilidade da ordem deve ser possível.
+
+---
+
+# 33. Benchmark — resultados
+
+Reportar pelo menos:
+
+por quantidade de threads:
+
+```text
+mean tick
+median tick
+p95
+p99
+ticks/s
+speedup
+```
+
+e entre execuções:
+
+```text
+median run
+min
+max
+```
+
+Se for simples, incluir desvio padrão.
+
+Não transforme o benchmark em framework estatístico complexo.
+
+---
+
+# 34. Benchmark e comandos
+
+Não inclua comandos no benchmark principal do Marco 001.
+
+O objetivo dele ainda é medir:
+
+```text
+movimentação sintética independente
+```
+
+Se desejar medir overhead da nova fase vazia:
+
+crie comparação simples entre:
+
+```text
+Marco anterior
+vs
+ApplyCommands sem comandos
+```
+
+ou registre o custo atual.
+
+Não misture workloads diferentes na mesma métrica.
+
+---
+
+# 35. Limites temporários
+
+A implementação atual possui proteções como:
+
+```text
+máximo de veículos
+máximo de vértices
+máximo de threads
+```
+
+Mantenha proteções razoáveis contra:
+
+- overflow;
+- alocações absurdas;
+- configurações obviamente inválidas.
+
+Porém:
+
+> Esses números NÃO representam limites de design do jogo.
+
+Atualizar documentação para chamar explicitamente esses valores de:
+
+```text
+temporary safety guards
+```
+
+ou equivalente.
+
+Não escreva documentação dizendo que:
+
+```text
+o jogo suporta no máximo X
+```
+
+com base nesses números.
+
+---
+
+# 36. API pública
+
+Após esta tarefa, a direção desejada é:
+
+```rust
+Simulation::new(...)
+
+Simulation::submit_command(...)
+
+Simulation::tick()
+
+Simulation::snapshot(...)
+
+Simulation::checksum()
+```
+
+Não é obrigatório usar exatamente essas assinaturas.
+
+O importante é preservar a fronteira conceitual.
+
+---
+
+# 37. Estrutura sugerida
+
+Pode ser criada algo como:
+
+```text
+crates/federation-sim/src/
+├── commands.rs
+├── snapshots.rs
+├── ids.rs
+```
+
+além dos módulos existentes.
+
+Não crie crate nova só para commands ou snapshots.
+
+Eles pertencem ao domínio do núcleo neste estágio.
+
+---
+
+# 38. Alocações e performance
+
+Este marco ainda deve preservar a filosofia data-oriented.
+
+Evite:
+
+- uma `Box` por comando;
+- trait objects para cada comando;
+- heap allocation individual por veículo em snapshots;
+- mutex por objeto;
+- clone completo de `Simulation`.
+
+Um enum:
+
+```rust
+enum SimulationCommand
+```
+
+é preferível nesta etapa a uma hierarquia baseada em traits.
+
+---
+
+# 39. Snapshots e SoA
+
+Snapshots não precisam necessariamente copiar a mesma estrutura SoA interna.
+
+Para renderer futuro, um formato compacto pode ser apropriado.
+
+Exemplo conceitual:
+
+```rust
+VehicleVisualSnapshot {
+    id,
+    x,
+    y,
+}
+```
+
+ou vetores estruturados.
+
+Escolha a opção mais simples.
+
+Documente que:
+
+```text
+snapshot representation != simulation storage representation
+```
+
+Essa separação será importante no futuro.
+
+---
+
+# 40. Não implementar nesta tarefa
+
+Não adicionar:
+
+- renderer;
 - `wgpu`;
+- `winit`;
+- Bevy;
+- ECS;
+- pathfinding;
+- estradas;
+- ferrovias;
+- cidadãos;
+- emprego;
+- transporte público;
+- economia;
+- fábricas;
+- logística;
+- save/load;
+- replay completo;
 - networking;
-- persistência de partidas;
-- plugins dinâmicos;
-- `unsafe`;
-- sistemas econômicos fictícios apenas para preencher arquitetura.
+- multiplayer;
+- Tokio;
+- banco de dados;
+- sistema de plugins;
+- scripting;
+- undo/redo.
 
-Use comentários para explicar decisões não óbvias, não para repetir o código.
+Alguns desses sistemas usarão Commands/Snapshots depois.
 
-## 8. Testes obrigatórios
+Não os antecipe.
 
-Inclua testes automatizados cobrindo:
+---
 
-1. Inicialização válida e inválida.
-2. Indexação de tiles, vértices e chunks.
-3. Alteração de alturas.
-4. Invalidação de chunks adjacentes em fronteiras.
-5. Comportamento nas bordas do mapa.
-6. Mapas retangulares.
-7. Simulação com zero veículos.
-8. Integridade dos arrays SoA.
-9. IDs estáveis.
-10. Reprodutibilidade da mesma seed.
-11. Igualdade do estado final entre diferentes quantidades de threads.
-12. Evolução correta do contador de ticks.
+# 41. Documentação
 
-Os testes de CI devem usar cenários pequenos e rápidos.
+Atualizar:
 
-O benchmark de 100.000 veículos deve ser executável separadamente, sem tornar a suíte de testes cotidiana lenta.
+```text
+README.md
+docs/architecture.md
+docs/benchmarks.md
+AGENTS.md
+```
 
-## 9. Documentação
+Documentar claramente:
 
-### README.md
+## Commands
 
-Explique:
-- O propósito do projeto.
-- Como instalar o toolchain.
-- Como compilar.
-- Como executar os testes.
-- Como executar o headless.
-- Como executar benchmarks.
-- O que já existe e o que ainda não existe.
+```text
+submit
+queue
+apply
+result
+ordering
+```
 
-### docs/architecture.md
+## Snapshots
 
-Documente:
-- Separação entre simulação e apresentação.
-- Ownership do estado.
-- Layout de memória das entidades.
-- Organização do terreno.
-- Estratégia de paralelismo.
-- Fases de execução.
-- Determinismo.
-- Limitações conhecidas.
-- Pontos de extensão futuros.
+```text
+ownership
+immutability
+revision queries
+copy cost
+```
 
-### docs/benchmarks.md
+## IDs
 
-Documente:
-- Cenários.
-- Warmup.
-- Quantidade de ticks medidos.
-- Métricas.
-- Ambiente.
-- Resultados efetivamente observados.
-- Limitações do benchmark sintético.
+```text
+public identity
+internal storage independence
+```
 
-### AGENTS.md
+## Scheduler
 
-Registre regras para futuras tarefas do Codex:
-- Preservar a independência do núcleo.
-- Priorizar desempenho mensurável.
-- Evitar alocações no hot path.
-- Manter determinismo onde possível.
-- Não introduzir dependências grandes sem justificativa.
-- Adicionar testes para novas regras.
-- Não afirmar ganhos de performance sem benchmarks.
-- Documentar mudanças arquiteturais relevantes.
+```text
+ApplyCommands
+Movement
+Finalize
+```
 
-## 10. CI e verificações
+## Determinismo
 
-Configure GitHub Actions para executar:
+Explicar como comandos entram no estado determinístico.
 
-- `cargo fmt --all -- --check`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-- `cargo build --workspace --release`
+---
 
-Não execute benchmarks pesados em todo pull request.
+# 42. AGENTS.md
 
-## 11. Critérios de aceitação
+Adicionar regras para futuras implementações:
 
-A tarefa será considerada concluída somente quando:
+- Nunca assumir que `VehicleId` é índice de array.
+- Estado externo deve ser alterado por comandos.
+- Renderers não recebem acesso mutável ao estado.
+- Snapshots não devem determinar arquitetura interna da simulação.
+- `dirty` interno não é protocolo de sincronização externo.
+- Revisões são preferidas para sincronização incremental.
+- Não introduzir concorrência em comandos sem benchmark e necessidade concreta.
+- Novos tipos de comando precisam de testes de determinismo.
 
-- [ ] O workspace Rust compilar.
-- [ ] O núcleo funcionar sem qualquer renderer.
-- [ ] O terreno suportar leitura, escrita e invalidação de chunks.
-- [ ] Os veículos forem armazenados em SoA.
-- [ ] O scheduler realmente executar trabalho em múltiplas threads.
-- [ ] A quantidade de threads for configurável.
-- [ ] Execuções equivalentes produzirem checksums iguais.
-- [ ] O executável headless funcionar por CLI.
-- [ ] O benchmark comparar diferentes contagens de threads.
-- [ ] O benchmark exportar JSON válido.
-- [ ] Os testes automatizados passarem.
-- [ ] O Clippy não apresentar warnings.
-- [ ] O código estiver formatado.
-- [ ] README, arquitetura e metodologia de benchmark estiverem documentados.
-- [ ] Não houver dependência de engine gráfica no núcleo.
+---
 
-Se alguma verificação não puder ser executada no ambiente disponível, informe isso explicitamente. Nunca marque como concluído algo que não foi verificado.
+# 43. CI
 
-## 12. Processo de implementação
+Preservar:
 
-Trabalhe nesta ordem:
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
+cargo build --workspace --release --locked
+```
 
-1. Inspecione o repositório e identifique o estado atual.
-2. Apresente um plano curto de implementação.
-3. Crie o workspace e os crates.
-4. Implemente terreno, chunks e testes.
-5. Implemente entidades SoA e inicialização determinística.
-6. Implemente scheduler e simulação.
-7. Implemente o executável headless.
-8. Implemente benchmarks e exportação JSON.
-9. Adicione documentação e CI.
-10. Execute as verificações disponíveis.
-11. Corrija erros encontrados.
-12. Apresente um relatório final.
+Não executar benchmark pesado em toda CI.
 
-Tome decisões locais razoáveis sem interromper o trabalho para perguntar sobre detalhes não essenciais. Documente essas decisões.
+Testes do sistema de comandos e snapshots devem ser rápidos.
 
-**Não amplie o escopo para criar um jogo completo.**
+---
 
-## 13. Formato da entrega final
+# 44. Critérios de aceitação
 
-Ao concluir, apresente:
+O Marco 002 será considerado concluído somente quando:
 
-**A. Resumo:** o que foi implementado.
+- [ ] existir `VehicleId` público e opaco;
+- [ ] APIs públicas não dependerem de índice interno;
+- [ ] comandos forem submetidos sem alterar imediatamente o estado;
+- [ ] comandos forem aplicados na fase `ApplyCommands`;
+- [ ] a ordem de aplicação for determinística;
+- [ ] comandos inválidos retornarem resultados explícitos;
+- [ ] comandos inválidos não corromperem a simulação;
+- [ ] alteração de terreno externa exigir comando;
+- [ ] alteração de veículo externa exigir comando;
+- [ ] não existir bypass público equivalente a `Simulation::set_height`;
+- [ ] snapshots forem imutáveis e independentes;
+- [ ] snapshots antigos continuarem válidos;
+- [ ] snapshots puderem ser solicitados explicitamente;
+- [ ] terreno não seja copiado integralmente sem necessidade;
+- [ ] revisões de chunks permitirem sincronização incremental;
+- [ ] `dirty` não seja necessário como protocolo externo;
+- [ ] determinismo funcione entre diferentes quantidades de threads;
+- [ ] checksum represente adequadamente o estado determinístico;
+- [ ] benchmark suporte múltiplas rodadas;
+- [ ] benchmark permita metodologia mais longa/reproduzível;
+- [ ] documentação seja atualizada;
+- [ ] testes existentes continuem passando;
+- [ ] CI continue válida;
+- [ ] nenhuma dependência gráfica entre no core.
 
-**B. Estrutura:** arquivos e módulos principais.
+---
 
-**C. Validação:** comandos executados e seus resultados reais.
+# 45. Processo recomendado
 
-**D. Performance:** tabela de benchmarks medidos, se o ambiente permitir.
+Executar nesta ordem:
 
-**E. Limitações:** pontos ainda simplificados ou não implementados.
+1. Inspecionar novamente a implementação existente.
+2. Identificar APIs públicas que permitem mutação direta.
+3. Introduzir `VehicleId`.
+4. Adaptar APIs existentes.
+5. Implementar tipos de comando.
+6. Implementar fila e sequence.
+7. Adicionar `ApplyCommands` ao scheduler.
+8. Implementar comandos de terreno.
+9. Implementar comandos de veículo.
+10. Criar resultados de aplicação.
+11. Implementar snapshots.
+12. Implementar consultas incrementais por revision.
+13. Adicionar testes.
+14. Atualizar checksum se necessário.
+15. Melhorar benchmark.
+16. Atualizar documentação.
+17. Executar fmt/clippy/test/build.
+18. Corrigir todas as falhas.
+19. Rodar benchmark representativo.
+20. Entregar relatório final.
 
-**F. Próxima tarefa recomendada:** um único marco técnico, com justificativa.
+---
 
-O objetivo final deste marco é possuir uma fundação pequena, confiável, reproduzível e mensurável sobre a qual construiremos a simulação de cidades, logística e economia de In The Federation's Name.
+# 46. Não interromper por decisões pequenas
+
+Se surgir uma decisão de implementação local que:
+
+- não altera o game design;
+- não altera os princípios arquiteturais;
+- é facilmente reversível;
+
+tome uma decisão razoável e documente-a.
+
+Não interrompa o trabalho para pedir confirmação sobre nomes de métodos ou pequenas estruturas internas.
+
+---
+
+# 47. Entrega final esperada
+
+Ao concluir, responder com:
+
+## A. Resumo
+
+O que foi implementado.
+
+## B. Mudanças arquiteturais
+
+Principalmente:
+
+```text
+IDs
+Commands
+Scheduler
+Snapshots
+Revisions
+```
+
+## C. API resultante
+
+Mostrar exemplos curtos da API pública.
+
+## D. Testes
+
+Listar testes adicionados e resultados.
+
+## E. Verificações
+
+Informar resultados reais de:
+
+```text
+fmt
+clippy
+test
+build
+```
+
+## F. Benchmark
+
+Apresentar resultados reais da metodologia revisada.
+
+Não inventar números.
+
+## G. Limitações
+
+Identificar conscientemente o que ainda está simplificado.
+
+## H. Riscos encontrados
+
+Apontar qualquer decisão atual que possa dificultar:
+
+```text
+Marco 003 — Transport Network
+```
+
+## I. Próximo marco
+
+Não implementar o próximo marco.
+
+Apenas avaliar se a arquitetura atual está pronta para ele.
+
+---
+
+# 48. Objetivo arquitetural final
+
+Ao término do Marco 002, queremos chegar a:
+
+```text
+                 FUTURE CLIENT
+                      │
+                  Commands
+                      ↓
+        ┌──────────────────────────┐
+        │       Simulation         │
+        │                          │
+        │    pending commands      │
+        │           ↓              │
+        │     ApplyCommands        │
+        │           ↓              │
+        │       Movement           │
+        │           ↓              │
+        │       Finalize           │
+        │                          │
+        │   authoritative state    │
+        └────────────┬─────────────┘
+                     │
+                Snapshots
+                     ↓
+                 CLIENT
+```
+
+O cliente nunca possui o estado autoritativo.
+
+O renderer futuro não determina como a simulação armazena dados.
+
+IDs públicos não determinam slots internos.
+
+Chunks usam revisões para sincronização incremental.
+
+Comandos definem uma fronteira determinística para alteração do mundo.
+
+Essa será a fundação necessária antes de começarmos o:
+
+```text
+MARCO 003
+TRANSPORT NETWORK & ROUTING FOUNDATION
+```

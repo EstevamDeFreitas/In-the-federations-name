@@ -41,7 +41,7 @@ impl SimulationConfig {
         }
         if self.vehicles > 10_000_000 {
             return Err(SimulationError::InvalidConfig(
-                "vehicles exceeds the initial limit of 10,000,000",
+                "vehicles exceeds the temporary safety guard of 10,000,000",
             ));
         }
         Ok(())
@@ -61,7 +61,7 @@ pub(crate) fn validate_geometry(
     let vertices = (u64::from(width) + 1).checked_mul(u64::from(height) + 1);
     if !matches!(vertices, Some(count) if count <= 16_777_216) {
         return Err(SimulationError::InvalidConfig(
-            "heightmap exceeds the initial limit of 16,777,216 vertices",
+            "heightmap exceeds the temporary safety guard of 16,777,216 vertices",
         ));
     }
     Ok(())

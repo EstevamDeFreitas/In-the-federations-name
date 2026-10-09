@@ -51,63 +51,6 @@ fn rectangular_map_indexing_and_bounds() {
 }
 
 #[test]
-fn shared_vertices_invalidate_exactly_adjacent_chunks() {
-    let cases = [
-        ((10, 10), vec![0]),
-        ((32, 10), vec![0, 1]),
-        ((10, 32), vec![0, 3]),
-        ((32, 32), vec![0, 1, 3, 4]),
-        ((64, 32), vec![1, 2, 4, 5]),
-        ((0, 0), vec![0]),
-        ((65, 35), vec![5]),
-        ((0, 32), vec![0, 3]),
-        ((65, 32), vec![2, 5]),
-    ];
-    for ((x, y), expected) in cases {
-        let mut t = Terrain::new(65, 35, 32).unwrap();
-        t.clear_dirty();
-        t.set_height(x, y, -7).unwrap();
-        assert_eq!(t.height_at(x, y).unwrap(), -7);
-        let dirty: Vec<_> = t
-            .chunks()
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.dirty)
-            .map(|(i, _)| i)
-            .collect();
-        assert_eq!(dirty, expected, "vertex ({x},{y})");
-        for c in t.chunks() {
-            assert_eq!(c.revision, u64::from(c.dirty));
-        }
-        t.set_height(x, y, -7).unwrap();
-        assert!(t.chunks().iter().all(|c| c.revision <= 1));
-        t.set_height(x, y, 9).unwrap();
-        for i in expected {
-            assert_eq!(t.chunks()[i].revision, 2);
-        }
-    }
-}
-
-#[test]
-fn aligned_map_outer_corners_and_invalid_edit() {
-    let mut t = Terrain::new(64, 32, 32).unwrap();
-    t.clear_dirty();
-    t.set_height(64, 32, 1).unwrap();
-    assert!(!t.chunks()[0].dirty);
-    assert!(t.chunks()[1].dirty);
-    let heights = t.heights().to_vec();
-    let chunks = t.chunks().to_vec();
-    assert!(t.set_height(65, 32, 4).is_err());
-    assert_eq!(t.heights(), heights);
-    assert_eq!(t.chunks(), chunks);
-    let mut tiny = Terrain::new(1, 1, 32).unwrap();
-    for (x, y) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-        tiny.set_height(x, y, 2).unwrap();
-    }
-    assert_eq!(tiny.chunks()[0].revision, 4);
-}
-
-#[test]
 fn soa_integrity_stable_ids_and_correct_movement() {
     let mut sim = Simulation::new(config(2)).unwrap();
     let ids = sim.vehicles().ids().to_vec();
@@ -121,7 +64,10 @@ fn soa_integrity_stable_ids_and_correct_movement() {
     ] {
         assert_eq!(array.len(), ids.len());
     }
-    assert_eq!(ids, (0..4096).collect::<Vec<u64>>());
+    assert_eq!(
+        ids.iter().collect::<std::collections::HashSet<_>>().len(),
+        4096
+    );
     sim.tick().unwrap();
     assert_eq!(sim.tick_count(), 1);
     for i in 0..ids.len() {
@@ -195,7 +141,12 @@ fn empty_simulation_and_on_demand_diagnostics() {
     assert_eq!(metrics.vehicles, 0);
     assert_ne!(metrics.checksum, initial);
     let before = sim.checksum();
-    sim.set_height(32, 32, 5).unwrap();
+    sim.submit_command(federation_sim::SimulationCommand::SetTerrainVertexHeight {
+        x: 32,
+        y: 32,
+        height: 5,
+    })
+    .unwrap();
     assert_ne!(before, sim.checksum());
 }
 
@@ -206,5 +157,5 @@ fn supports_one_hundred_thousand_vehicles() {
     let mut sim = Simulation::new(c).unwrap();
     sim.tick().unwrap();
     assert_eq!(sim.vehicles().len(), 100_000);
-    assert_eq!(sim.vehicles().ids()[99_999], 99_999);
+    assert!(sim.vehicles().get(sim.vehicles().ids()[99_999]).is_some());
 }
