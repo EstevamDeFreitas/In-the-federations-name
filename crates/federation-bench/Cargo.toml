@@ -1,0 +1,17 @@
+[package]
+name = "federation-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+federation-sim.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies.federation-headless]
+path = "../federation-headless"

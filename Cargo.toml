@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/federation-sim", "crates/federation-headless", "crates/federation-bench"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+version = "0.1.0"
+
+[workspace.dependencies]
+rayon = "1.10"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+federation-sim = { path = "crates/federation-sim" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

@@ -1,0 +1,34 @@
+# Repository Guidelines
+
+## Project Structure & Module Organization
+
+This Rust 2024 workspace implements the headless simulation foundation for **In The Federation's Name**. Read `Instructions.md` for the milestone requirements. Always look for `.github/prompts/` and read applicable Markdown instructions before working; that directory is currently absent.
+
+- `crates/federation-sim/src/`: configuration, terrain/chunks, SoA vehicles, deterministic RNG, scheduler, simulation and metrics.
+- `crates/federation-sim/tests/`: behavioral integration tests.
+- `crates/federation-headless/`: executable host and shared CLI/report utilities.
+- `crates/federation-bench/`: comparative synthetic movement benchmark.
+- `docs/`: architecture and measured benchmark methodology/results.
+
+## Build, Test, and Development Commands
+
+Use the stable toolchain selected by `rust-toolchain.toml`. Keep `Cargo.lock` versioned.
+
+- `cargo build --workspace --release --locked`: compile optimized hosts and library.
+- `cargo test --workspace --locked`: run unit, integration and documentation tests.
+- `cargo fmt --all -- --check`: verify formatting.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: reject lint warnings.
+- `cargo run -p federation-headless --release -- --ticks 200 --threads 4`: run the simulation.
+- `cargo run -p federation-bench --release -- --threads 1,2,4,8,16`: measure parallel tick performance and export JSON.
+
+## Coding Style & Architecture Rules
+
+Use Rustfmt, four-space indentation, snake_case modules/functions and PascalCase types. Unsafe code is forbidden. Keep the core independent of rendering, windows and UI frameworks. Expose controlled operations and immutable state views. Preserve integer simulation state and deterministic initialization. Avoid per-entity allocations in the hot path and large dependencies without justification. Document architectural changes and provisional units.
+
+## Testing & Performance Guidelines
+
+Use Rust's built-in test framework and descriptive behavior-based test names. Add tests for new rules, boundaries and invalid inputs. Preserve checks across 1, 2 and 4 threads. Keep everyday tests small; run extended benchmarks separately. No coverage percentage is currently mandated. Prioritize measurable performance and never claim speedups without actual benchmarks.
+
+## Commit & Pull Request Guidelines
+
+No existing commit history establishes conventions. Use concise imperative subjects, such as `Add deterministic vehicle movement`. Keep changes focused. Pull requests should explain behavior, link relevant issues, report validation and document limitations; include screenshots only for visible interface changes.

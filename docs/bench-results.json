@@ -1,0 +1,93 @@
+{
+  "environment": {
+    "os": "windows",
+    "architecture": "x86_64",
+    "logical_cpus": 12,
+    "build_mode": "release"
+  },
+  "scenario": {
+    "width": 512,
+    "height": 512,
+    "chunk_size": 32,
+    "vehicles": 100000,
+    "seed": 42,
+    "tick_ms": 20
+  },
+  "warmup_ticks": 30,
+  "measured_ticks": 200,
+  "total_simulated_ticks": 230,
+  "checksum_algorithm": "FNV-1a-64 / federation-state-v1",
+  "checksums_match": true,
+  "results": [
+    {
+      "threads": 1,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 1.5609204999999993,
+        "median_ms": 1.5455500000000002,
+        "p95_ms": 1.6701000000000001,
+        "p99_ms": 1.7608000000000001,
+        "tick_seconds": 0.31218409999999985,
+        "ticks_per_second": 640.6476178639466
+      },
+      "speedup": 1,
+      "checksum": "0e1d724d501061bc"
+    },
+    {
+      "threads": 2,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 0.777868,
+        "median_ms": 0.76755,
+        "p95_ms": 0.8511000000000001,
+        "p99_ms": 0.8742,
+        "tick_seconds": 0.1555736,
+        "ticks_per_second": 1285.5651601557076
+      },
+      "speedup": 2.0066650125728263,
+      "checksum": "0e1d724d501061bc"
+    },
+    {
+      "threads": 4,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 0.43114299999999994,
+        "median_ms": 0.42785,
+        "p95_ms": 0.481,
+        "p99_ms": 0.5139,
+        "tick_seconds": 0.08622859999999999,
+        "ticks_per_second": 2319.416063811775
+      },
+      "speedup": 3.620424082033106,
+      "checksum": "0e1d724d501061bc"
+    },
+    {
+      "threads": 8,
+      "oversubscribed": false,
+      "timing": {
+        "mean_ms": 0.262495,
+        "median_ms": 0.2554,
+        "p95_ms": 0.3144,
+        "p99_ms": 0.4133,
+        "tick_seconds": 0.05249899999999999,
+        "ticks_per_second": 3809.5963732642535
+      },
+      "speedup": 5.946477075753822,
+      "checksum": "0e1d724d501061bc"
+    },
+    {
+      "threads": 16,
+      "oversubscribed": true,
+      "timing": {
+        "mean_ms": 0.1630999999999999,
+        "median_ms": 0.15789999999999998,
+        "p95_ms": 0.1982,
+        "p99_ms": 0.2255,
+        "tick_seconds": 0.03261999999999998,
+        "ticks_per_second": 6131.207847946049
+      },
+      "speedup": 9.570328019619867,
+      "checksum": "0e1d724d501061bc"
+    }
+  ]
+}
